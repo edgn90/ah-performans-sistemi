@@ -2,44 +2,32 @@ import streamlit as st
 import pandas as pd
 from fpdf import FPDF
 import io
+import datetime
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="Performans İtiraz Yönetimi", layout="wide")
+st.set_page_config(page_title="Resmi İtiraz Komisyon Raporu", layout="wide", page_icon="⚖️")
 
-# --- CSS İLE STİLLENDİRME ---
-st.markdown("""
-    <style>
-    .main { background-color: #f5f7f9; }
-    .stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #007BFF; color: white; }
-    </style>
-    """, unsafe_allow_html=True)
+# --- SABİT SÜTUN LİSTESİ (İSTENEN FORMAT) ---
+ISTENEN_SUTUNLAR = [
+    "SIRA NO", "ASM ADI", "HEKİM BİRİM NO", "HEKİMİN ADI SOYADI", "HEKİMİN TC KİMLİK NO'SU",
+    "İTİRAZ SEBEBİ", "İTİRAZ KONUSU", "İTİRAZ KONUSU KİŞİNİN ADI SOYADI", "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO'SU",
+    "GEBE İZLEM", "LOHUSA İZLEM", "BEBEK İZLEM", "ÇOCUK İZLEM",
+    "DaBT-İPA-Hib-Hep-B", "HEP B", "BCG", "KKK", "HEP A", "KPA", "OPA", "SUÇİÇEĞİ", "DaBT-İPA", "TD",
+    "KABUL", "RED", "GEREKSİZ BAŞVURU", "KARAR AÇIKLAMASI"
+]
 
-# --- FONKSİYONLAR ---
-def classify_performance(score):
-    try:
-        score = float(str(score).replace(',', '.')) # Virgüllü sayıları düzelt
-        if score < 85: return "Acil Müdahale"
-        elif score < 95: return "Geliştirilmeli"
-        else: return "Başarılı"
-    except:
-        return "Hata"
-
-# --- PDF SINIFI ---
-class RaporPDF(FPDF):
-    def __init__(self, baslik, uyeler, baskan):
-        super().__init__()
-        self.rapor_basligi = baslik
-        self.uyeler = uyeler
-        self.baskan = baskan
+# --- PDF SINIFI (A3 YATAY & RESMİ BAŞLIK) ---
+class ResmiPDF(FPDF):
+    def __init__(self, ilce, donem):
+        super().__init__(orientation='L', unit='mm', format='A3') # Sütun çokluğundan dolayı A3
+        self.ilce = ilce
+        self.donem = donem
 
     def header(self):
         self.set_font('Arial', 'B', 12)
-        try:
-            # Türkçe karakter desteği için font eklemeyi deneyebiliriz, 
-            # ancak varsayılan Arial ile devam ediyoruz.
-            self.cell(0, 10, self.rapor_basligi, 0, 1, 'C')
-        except:
-            self.cell(0, 10, "RAPOR BASLIGI", 0, 1, 'C')
+        self.cell(0, 6, "AILE HEKIMLIGI UYGULAMASI PERFORMANS ITIRAZ FORMLARI DEGERLENDIRME TABLOSU", 0, 1, 'C')
+        self.cell(0, 6, f"{self.ilce} ILCE SAGLIK MUDURLUGU", 0, 1, 'C')
+        self.cell(0, 6, f"ITIRAZ DONEMI : {self.donem}", 0, 1, 'C')
         self.ln(5)
 
     def footer(self):
@@ -47,157 +35,182 @@ class RaporPDF(FPDF):
         self.set_font('Arial', 'I', 8)
         self.cell(0, 10, f'Sayfa {self.page_no()}', 0, 0, 'C')
 
-    def imza_blogu(self):
-        self.ln(20)
-        self.set_font('Arial', 'B', 10)
-        
-        # Komisyon Üyeleri
-        start_y = self.get_y()
-        for i in range(0, 6, 2):
-            # İsimleri güvenli yazdırma (karakter hatası önlemi)
-            name1 = self.uyeler[i] if i < len(self.uyeler) else ""
-            name2 = self.uyeler[i+1] if i+1 < len(self.uyeler) else ""
-            
-            self.cell(90, 10, name1, 0, 0, 'C')
-            if name2:
-                self.cell(90, 10, name2, 0, 1, 'C')
-            else:
-                self.ln()
-                
-            self.set_font('Arial', '', 9)
-            self.cell(90, 5, "Komisyon Uyesi (Imza)" if name1 else "", 0, 0, 'C')
-            if name2:
-                self.cell(90, 5, "Komisyon Uyesi (Imza)", 0, 1, 'C')
-            else:
-                self.ln()
-            self.set_font('Arial', 'B', 10)
-            self.ln(10)
-        
-        # Komisyon Başkanı
-        self.ln(10)
-        self.cell(0, 10, self.baskan, 0, 1, 'C')
-        self.set_font('Arial', '', 9)
-        self.cell(0, 5, "Komisyon Baskani (Imza)", 0, 1, 'C')
+def clean_text(text):
+    """Türkçe karakterleri PDF için Latin-1'e uygun hale getirir"""
+    if pd.isna(text): return ""
+    text = str(text)
+    replacements = {
+        'ğ': 'g', 'Ğ': 'G', 'ü': 'u', 'Ü': 'U', 'ş': 's', 'Ş': 'S',
+        'ı': 'i', 'İ': 'I', 'ö': 'o', 'Ö': 'O', 'ç': 'c', 'Ç': 'C'
+    }
+    for search, replace in replacements.items():
+        text = text.replace(search, replace)
+    return text
 
-# --- ANA EKRAN ---
-st.title("📋 AH Performans İtiraz Veri ve Rapor Sistemi")
+# --- ANA UYGULAMA ---
+st.title("⚖️ Resmi Format: Performans İtiraz Değerlendirme Tablosu")
+st.markdown("Bu modül, yüklenen veriyi **A3 boyutunda PDF** ve **resmi başlıklı Excel** formatına dönüştürür.")
 
-# --- SOL PANEL: KOMİSYON AYARLARI ---
-st.sidebar.header("📝 Komisyon Bilgileri")
-baskan_adi = st.sidebar.text_input("Komisyon Başkanı", "Dr. Ahmet YILMAZ")
-uye_listesi = []
-for i in range(1, 7):
-    uye = st.sidebar.text_input(f"{i}. Komisyon Üyesi", f"Uye {i}")
-    uye_listesi.append(uye)
+# --- SIDEBAR: VERİ GİRİŞİ ---
+with st.sidebar:
+    st.header("📝 Evrak Bilgileri")
+    ilce_adi = st.text_input("İlçe Adı (Büyük Harf)", "ÜMRANİYE").upper()
+    donem = st.text_input("Dönem (Ay / Yıl)", "OCAK / 2026")
+    
+    st.markdown("---")
+    st.header("✍️ Komisyon Üyeleri")
+    baskan = st.text_input("Komisyon Başkanı", "Dr. Adı Soyadı")
+    uyeler = []
+    for i in range(1, 6):
+        uye = st.text_input(f"Üye {i}", f"Üye {i} Adı Soyadı")
+        if uye: uyeler.append(uye)
 
-st.sidebar.markdown("---")
-uploaded_file = st.sidebar.file_uploader("Dosya Yükle (Excel veya CSV)", type=['xlsx', 'csv'])
+    st.markdown("---")
+    uploaded_file = st.file_uploader("Veri Dosyası Yükle (Excel/CSV)", type=['xlsx', 'csv'])
 
+# --- İŞLEM MANTIĞI ---
 if uploaded_file:
-    try:
-        # Dosya türüne göre okuma
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file, sep=None, engine='python') # Otomatik ayırıcı tespiti
+    # 1. Veriyi Oku
+    if uploaded_file.name.endswith('.csv'):
+        df_raw = pd.read_csv(uploaded_file, sep=None, engine='python')
+    else:
+        df_raw = pd.read_excel(uploaded_file)
+    
+    st.info(f"Yüklenen dosyada {len(df_raw)} satır veri bulundu. Şimdi resmi formata dönüştürülüyor...")
+
+    # 2. DataFrame'i İstenen 27 Sütunluk Formata Oturt
+    # Boş bir taslak oluştur
+    df_final = pd.DataFrame(columns=ISTENEN_SUTUNLAR)
+    
+    # Mevcut veriyi eşleştirmeye çalış (Basit eşleştirme)
+    # Eğer yüklenen dosyada sütun isimleri birebir aynı değilse, kullanıcıya manuel seçim yaptırabiliriz
+    # Ancak pratiklik adına burada otomatik sütun oluşturuyoruz, verileri dosyadaki sıraya veya isme göre çekiyoruz.
+    
+    # Otomatik sütun eşleştirme (İsim benzerliğine göre)
+    for col in ISTENEN_SUTUNLAR:
+        # Yüklenen dosyada bu sütuna benzer bir şey var mı?
+        match = [c for c in df_raw.columns if col.replace(" ", "").lower() in c.replace(" ", "").lower()]
+        if match:
+            df_final[col] = df_raw[match[0]]
         else:
-            df = pd.read_excel(uploaded_file)
-            
-        st.success("Dosya başarıyla yüklendi. Lütfen sütunları eşleştirin.")
-        
-        # --- SÜTUN EŞLEŞTİRME (HATA ÖNLEYİCİ) ---
-        col1, col2 = st.columns(2)
-        with col1:
-            # Birim adını içeren sütunu seçtir
-            birim_col = st.selectbox("Birim Adı Hangi Sütunda?", df.columns, index=0)
-        with col2:
-            # Puanı içeren sütunu seçtir
-            # Otomatik olarak içinde 'puan', 'performans', 'oran' geçen sütunu bulmaya çalış
-            potential_score_cols = [c for c in df.columns if any(x in str(c).lower() for x in ['puan', 'performans', 'oran', 'yüzde'])]
-            default_ix = df.columns.get_loc(potential_score_cols[0]) if potential_score_cols else 1
-            if default_ix >= len(df.columns): default_ix = 0
-            
-            puan_col = st.selectbox("Performans Puanı Hangi Sütunda?", df.columns, index=default_ix)
-        
-        # Seçilen sütunları standart isme çevir
-        df = df.rename(columns={birim_col: 'Birim_Adi', puan_col: 'Performans'})
-        
-        # Analizi Çalıştır
-        df['Durum'] = df['Performans'].apply(classify_performance)
-        
-        # --- YÖNETİCİ ÖZETİ EKRANI ---
-        col_main1, col_main2 = st.columns([2, 1])
-        
-        with col_main1:
-            st.subheader("Birim Performans Analizi")
-            st.dataframe(df[['Birim_Adi', 'Performans', 'Durum']].style.highlight_max(axis=0, color='#d4edda'))
+            df_final[col] = "" # Yoksa boş bırak
 
-        with col_main2:
-            st.subheader("İşlemler")
-            
-            # --- EXCEL RAPOR ÜRETME ---
-            output_excel = io.BytesIO()
-            with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
-                df.to_excel(writer, index=False, sheet_name='Rapor', startrow=2)
-                workbook  = writer.book
-                worksheet = writer.sheets['Rapor']
-                
-                # Başlık
-                worksheet.write('A1', 'PERFORMANS KOMISYON RAPORU', workbook.add_format({'bold': True, 'size': 14}))
-                
-                # İmza Bloğu
-                last_row = len(df) + 5
-                worksheet.write(last_row, 1, "Komisyon Uyeleri", workbook.add_format({'bold': True}))
-                for i, name in enumerate(uye_listesi):
-                    worksheet.write(last_row + 1 + i, 1, name)
-                
-                worksheet.write(last_row + 8, 3, "Komisyon Baskani", workbook.add_format({'bold': True}))
-                worksheet.write(last_row + 9, 3, baskan_adi)
+    # Sıra No Otomatik Ver
+    df_final["SIRA NO"] = range(1, len(df_final) + 1)
 
-            st.download_button(
-                label="📗 Excel Raporu İndir",
-                data=output_excel.getvalue(),
-                file_name="Performans_Komisyon_Raporu.xlsx",
-                mime="application/vnd.ms-excel"
-            )
+    # Veri Önizleme
+    st.write("### 🔍 Oluşturulacak Tablo Önizlemesi")
+    st.dataframe(df_final.head())
 
-            # --- PDF RAPOR ÜRETME ---
-            if st.button("📕 PDF Yönetici Özeti Hazırla"):
-                pdf = RaporPDF("AILE HEKIMLIGI PERFORMANS DEGERLENDIRME", uye_listesi, baskan_adi)
-                pdf.add_page()
-                
-                # Tablo Başlıkları
-                pdf.set_font('Arial', 'B', 10)
-                pdf.cell(90, 10, 'Birim Adi', 1)
-                pdf.cell(40, 10, 'Puan', 1)
-                pdf.cell(60, 10, 'Durum', 1)
-                pdf.ln()
-                
-                # Tablo İçeriği
-                pdf.set_font('Arial', '', 10)
-                for _, row in df.iterrows():
-                    # Türkçe karakter sorununu bypass etmek için basit replace veya encode
-                    birim_adi = str(row['Birim_Adi']).encode('latin-1', 'ignore').decode('latin-1')
-                    durum = str(row['Durum']).encode('latin-1', 'ignore').decode('latin-1')
-                    
-                    pdf.cell(90, 10, birim_adi[:35], 1) # Çok uzun isimleri kırp
-                    pdf.cell(40, 10, str(row['Performans']), 1)
-                    pdf.cell(60, 10, durum, 1)
-                    pdf.ln()
-                    
-                    if pdf.get_y() > 220:
-                        pdf.add_page()
+    # --- İNDİRME ALANI ---
+    col1, col2 = st.columns(2)
 
-                pdf.imza_blogu()
-                
-                pdf_output = pdf.output(dest='S').encode('latin-1', 'ignore')
-                st.download_button(
-                    label="📥 PDF Dosyasını Kaydet",
-                    data=pdf_output,
-                    file_name="Yonetici_Ozeti.pdf",
-                    mime="application/pdf"
-                )
+    # --- A. EXCEL OLUŞTURMA (XLSXWRITER) ---
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+        df_final.to_excel(writer, sheet_name='Itiraz_Degerlendirme', startrow=4, index=False)
+        workbook = writer.book
+        worksheet = writer.sheets['Itiraz_Degerlendirme']
+        
+        # Formatlar
+        merge_format = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'font_size': 12})
+        header_format = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#f0f0f0', 'border': 1})
+        border_format = workbook.add_format({'border': 1})
+        
+        # 1. Başlık Kısmı (Satır 1-3)
+        worksheet.merge_range('A1:AA1', "AİLE HEKİMLİĞİ UYGULAMASI PERFORMANS İTİRAZ FORMLARI DEĞERLENDİRME TABLOSU", merge_format)
+        worksheet.merge_range('A2:AA2', f"{ilce_adi} İLÇE SAĞLIK MÜDÜRLÜĞÜ", merge_format)
+        worksheet.merge_range('A3:AA3', f"İTİRAZ DÖNEMİ : {donem}", merge_format)
+        
+        # 2. Sütun Başlıklarını Formatla
+        for col_num, value in enumerate(df_final.columns.values):
+            worksheet.write(4, col_num, value, header_format)
+            worksheet.set_column(col_num, col_num, 15) # Sütun genişliği
 
-    except Exception as e:
-        st.error(f"Bir hata oluştu: {e}")
-        st.info("Lütfen yüklediğiniz dosyanın formatını kontrol edin.")
+        # 3. İmza Bloğu (Verinin bittiği yerin altına)
+        last_row = len(df_final) + 7
+        
+        # Üyeler
+        worksheet.write(last_row, 2, "KOMİSYON ÜYELERİ", workbook.add_format({'bold': True}))
+        for i, uye in enumerate(uyeler):
+            worksheet.write(last_row + 2, (i*4)+1, uye, workbook.add_format({'align': 'center'}))
+            worksheet.write(last_row + 3, (i*4)+1, "Komisyon Üyesi\n(İmza)", workbook.add_format({'align': 'center', 'text_wrap': True}))
+
+        # Başkan
+        worksheet.write(last_row + 6, 10, baskan, workbook.add_format({'align': 'center', 'bold': True}))
+        worksheet.write(last_row + 7, 10, "Komisyon Başkanı\n(İmza)", workbook.add_format({'align': 'center'}))
+
+    with col1:
+        st.download_button(
+            label="📗 Resmi Excel İndir",
+            data=excel_buffer.getvalue(),
+            file_name=f"{ilce_adi}_Itiraz_Komisyon_Karari.xlsx",
+            mime="application/vnd.ms-excel"
+        )
+
+    # --- B. PDF OLUŞTURMA (FPDF A3) ---
+    pdf = ResmiPDF(clean_text(ilce_adi), clean_text(donem))
+    pdf.add_page()
+    
+    # Tablo Başlıkları
+    pdf.set_font('Arial', 'B', 7) # Küçük font (27 sütun için mecburi)
+    col_width = 15 # Ortalama sütun genişliği (mm)
+    
+    # Bazı sütunları daralt, bazılarını genişlet
+    widths = [8, 25, 12, 25, 20, 20, 20, 25, 20] + [10]*14 + [10, 10, 15, 30]
+    
+    # Başlık Satırı Yaz
+    row_height = 8
+    for i, col_name in enumerate(ISTENEN_SUTUNLAR):
+        pdf.cell(widths[i], row_height, clean_text(col_name)[:15], 1, 0, 'C')
+    pdf.ln()
+    
+    # Veri Satırları
+    pdf.set_font('Arial', '', 6)
+    for _, row in df_final.iterrows():
+        # Sayfa sonu kontrolü
+        if pdf.get_y() > 270:
+            pdf.add_page()
+            # Başlıkları tekrar yaz
+            pdf.set_font('Arial', 'B', 7)
+            for i, col_name in enumerate(ISTENEN_SUTUNLAR):
+                pdf.cell(widths[i], row_height, clean_text(col_name)[:15], 1, 0, 'C')
+            pdf.ln()
+            pdf.set_font('Arial', '', 6)
+
+        for i, col_name in enumerate(ISTENEN_SUTUNLAR):
+            val = clean_text(row[col_name])
+            pdf.cell(widths[i], 6, val[:20], 1, 0, 'C') # İçeriği kırp
+        pdf.ln()
+
+    # İmza Bloğu
+    if pdf.get_y() > 240: pdf.add_page()
+    pdf.ln(15)
+    pdf.set_font('Arial', 'B', 8)
+    
+    # Üyeleri yan yana diz
+    y_pos = pdf.get_y()
+    for i, uye in enumerate(uyeler):
+        x_pos = 10 + (i * 50)
+        pdf.set_xy(x_pos, y_pos)
+        pdf.cell(45, 5, clean_text(uye), 0, 1, 'C')
+        pdf.set_xy(x_pos, y_pos + 5)
+        pdf.cell(45, 5, "Komisyon Uyesi", 0, 1, 'C')
+    
+    # Başkanı ortaya koy
+    pdf.set_xy(150, y_pos + 20)
+    pdf.cell(50, 5, clean_text(baskan), 0, 1, 'C')
+    pdf.set_xy(150, y_pos + 25)
+    pdf.cell(50, 5, "Komisyon Baskani", 0, 1, 'C')
+
+    pdf_output = pdf.output(dest='S').encode('latin-1', 'ignore')
+
+    with col2:
+        st.download_button(
+            label="📕 Resmi PDF İndir (A3)",
+            data=pdf_output,
+            file_name=f"{ilce_adi}_Itiraz_Komisyon_Karari.pdf",
+            mime="application/pdf"
+        )
 else:
-    st.info("Lütfen analiz için sol menüden dosya yükleyiniz.")
+    st.warning("Lütfen işlem yapmak için bir veri dosyası yükleyiniz.")
