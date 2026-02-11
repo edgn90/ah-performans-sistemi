@@ -7,16 +7,15 @@ import io
 st.set_page_config(page_title="Hatasız İtiraz Raporu", layout="wide", page_icon="⚖️")
 
 # --- KESİN SÜTUN EŞLEŞTİRME HARİTASI ---
-# Sol taraf: Bizim Rapor Sütunu | Sağ Taraf: Excel'deki Gerçek Sütun Adı
-# Excel başlıklarınızdan emin olduğumuz için bu yöntem %100 çalışır.
+# Sol: Rapordaki Başlık | Sağ: Excel'deki Başlık (Birebir aynı olmalı)
 COLUMN_MAPPING = {
-    "SIRA NO": "OTOMATIK", # Kod üretecek
+    "SIRA NO": "OTOMATIK", 
     "ASM ADI": "ASM ADI",
     "HEKİM BİRİM NO": "HEKİM BİRİM NO",
     "HEKİM ADI SOYADI": "HEKİM ADI SOYADI",
     "HEKİM-ASÇ TC KİMLİK NO": "HEKİM-ASÇ TC KİMLİK NO",
     "İTİRAZ SEBEBİ": "İTİRAZ SEBEBİ",
-    "İTİRAZ KONUSU": "İTİRAZ NEDENİ", # Excel'de 'İTİRAZ NEDENİ' olarak geçiyor olabilir
+    "İTİRAZ KONUSU": "İTİRAZ NEDENİ", # Excel'de genellikle bu isimle gelir
     "İTİRAZ KONUSU KİŞİNİN ADI SOYADI": "İTİRAZ KONUSU KİŞİNİN ADI SOYADI",
     "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO": "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO",
     "GEBE İZLEM": "GEBE İZLEM",
@@ -30,7 +29,7 @@ COLUMN_MAPPING = {
     "HEP A": "HEP A",
     "KPA": "KPA",
     "OPA": "OPA",
-    "SUÇİÇEĞİ": "SU ÇİÇEĞİ", # Excel'de boşluklu olabilir
+    "SUÇİÇEĞİ": "SU ÇİÇEĞİ", 
     "DaBT-İPA": "DaBT-İPA",
     "TD": "TD",
     "KABUL": "KABUL",
@@ -39,7 +38,7 @@ COLUMN_MAPPING = {
     "KARAR AÇIKLAMASI": "KARAR AÇIKLAMASI"
 }
 
-# --- ÇIKTI SÜTUN SIRASI ---
+# Çıktı sırası
 ISTENEN_SUTUNLAR = list(COLUMN_MAPPING.keys())
 
 # --- PDF BAŞLIK KISALTMALARI (A4 İÇİN) ---
@@ -126,65 +125,70 @@ if uploaded_file:
         st.error("Excel dosyası okunamadı.")
         st.stop()
     
-    # --- VERİ İŞLEME VE EŞLEŞTİRME ---
+    # --- VERİ İŞLEME ---
     df_final = pd.DataFrame()
     
-    # Her bir hedef sütun için kaynaktan doğru veriyi çek
     for target_col, source_col in COLUMN_MAPPING.items():
-        if target_col == "SIRA NO":
-            continue # Sonra ekleyeceğiz
+        if target_col == "SIRA NO": continue
         
-        # Excel'deki sütun ismini bulmaya çalış (Büyük/Küçük harf duyarsız)
-        found = False
+        # Sütun bulma mantığı
+        found_col = None
         for col in df_raw.columns:
-            if source_col.lower() == col.lower(): # Tam eşleşme ara
-                df_final[target_col] = df_raw[col]
-                found = True
+            # 1. Tam Eşleşme
+            if source_col.lower() == col.lower():
+                found_col = col
                 break
-            # Alternatif: "SU ÇİÇEĞİ" vs "SUÇİÇEĞİ" durumu
-            elif source_col.replace(" ","") == col.replace(" ",""):
-                df_final[target_col] = df_raw[col]
-                found = True
+            # 2. Boşluksuz Eşleşme (SU ÇİÇEĞİ vs SUÇİÇEĞİ)
+            if source_col.replace(" ","").lower() == col.replace(" ","").lower():
+                found_col = col
                 break
-        
-        if not found:
-            # Eğer sütun bulunamazsa (Örn: İtiraz Nedeni yoksa) boş bırak
-            df_final[target_col] = ""
+                
+        if found_col:
+            df_final[target_col] = df_raw[found_col]
+        else:
+            df_final[target_col] = "" # Bulunamayan sütun boş kalsın
 
-    # Sıra No ve Boşluk Temizliği
     df_final["SIRA NO"] = range(1, len(df_final) + 1)
-    df_final = df_final[ISTENEN_SUTUNLAR] # Sıralamayı garantiye al
-    df_final = df_final.fillna("")
+    df_final = df_final[ISTENEN_SUTUNLAR] # Sıralamayı düzelt
+    df_final = df_final.fillna("") # NaN temizliği
     
-    st.success(f"{len(df_final)} satır veri başarıyla eşleştirildi.")
-    st.dataframe(df_final.head()) # Kontrol için göster
+    st.success(f"{len(df_final)} satır veri işlendi.")
+    st.dataframe(df_final.head())
     
     col1, col2 = st.columns(2)
 
-    # --- 1. EXCEL ---
+    # --- 1. EXCEL ÇIKTISI ---
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
         df_final.to_excel(writer, sheet_name='Rapor', startrow=4, index=False)
+        
+        # --- EKLENEN DÜZELTME: workbook TANIMI ---
+        workbook = writer.book  # <--- HATA BURADAYDI, DÜZELTİLDİ
         worksheet = writer.sheets['Rapor']
+        
         worksheet.set_landscape()
         worksheet.set_paper(9)
         worksheet.fit_to_pages(1, 0)
         worksheet.set_margins(0.2, 0.2, 0.5, 0.5)
         
+        # Formatlar
         fmt_wrap = workbook.add_format({'text_wrap': True, 'valign': 'vcenter', 'align': 'center', 'border': 1, 'font_size': 7})
         fmt_head = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#DDDDDD', 'border': 1, 'text_wrap': True, 'font_size': 8})
         fmt_title = workbook.add_format({'bold': True, 'align': 'center', 'font_size': 11})
 
+        # Başlıklar
         worksheet.merge_range('A1:AA1', "AİLE HEKİMLİĞİ PERFORMANS İTİRAZ DEĞERLENDİRME TABLOSU", fmt_title)
         worksheet.merge_range('A2:AA2', f"{ilce_adi} İLÇE SAĞLIK MÜDÜRLÜĞÜ", fmt_title)
         worksheet.merge_range('A3:AA3', f"DÖNEM: {donem}", fmt_title)
         
         for i, col in enumerate(df_final.columns):
             worksheet.write(4, i, col, fmt_head)
+            
         for row_idx, row in df_final.iterrows():
             for col_idx, val in enumerate(row):
                 worksheet.write(row_idx+5, col_idx, val, fmt_wrap)
         
+        # İmza Bloğu
         last_row = len(df_final) + 8
         for i, u in enumerate(uyeler):
             worksheet.write(last_row, 1 + (i*3), u)
@@ -195,11 +199,12 @@ if uploaded_file:
     with col1:
         st.download_button("📗 Excel İndir", excel_buffer.getvalue(), "Rapor.xlsx")
 
-    # --- 2. PDF ---
+    # --- 2. PDF ÇIKTISI ---
     try:
         pdf = A4LandscapePDF(clean_text(ilce_adi), clean_text(donem))
         pdf.add_page()
         
+        # Sütun Genişlikleri
         col_ws = [5, 18, 9, 18, 14, 12, 12, 18, 14, 5, 5, 5, 5, 8, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 8, 28]
         
         # Header
@@ -217,6 +222,7 @@ if uploaded_file:
         for _, row in df_final.iterrows():
             line_height = 2.5
             max_lines = 1
+            # Satır yüksekliği hesapla
             for i, col in enumerate(ISTENEN_SUTUNLAR):
                 text = clean_text(row[col])
                 width = pdf.get_string_width(text)
@@ -226,6 +232,7 @@ if uploaded_file:
             if max_lines > 4: max_lines = 4
             curr_h = max_lines * line_height
             
+            # Sayfa Sonu
             if pdf.get_y() + curr_h > 195:
                 pdf.add_page()
                 pdf.set_font('Arial', 'B', 5)
@@ -253,6 +260,7 @@ if uploaded_file:
             pdf.cell(35, 4, clean_text(m), 0, 1, 'C')
             pdf.set_xy(10+(i*40), y_sig+4)
             pdf.cell(35, 4, "Imza", 0, 1, 'C')
+        
         pdf.set_xy(130, y_sig+15)
         pdf.cell(40, 4, clean_text(baskan), 0, 1, 'C')
         pdf.set_xy(130, y_sig+19)
