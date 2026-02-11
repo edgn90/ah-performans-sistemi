@@ -34,7 +34,7 @@ class A4LandscapePDF(FPDF):
         super().__init__(orientation='L', unit='mm', format='A4')
         self.ilce = ilce
         self.donem = donem
-        self.set_margins(5, 10, 5) # Kenar boşluklarını daralt (Sığdırmak için)
+        self.set_margins(5, 10, 5) # Kenar boşluklarını daralt
 
     def header(self):
         self.set_font('Arial', 'B', 10)
@@ -70,22 +70,33 @@ with st.sidebar:
 
 if uploaded_file:
     # Veri Okuma
-    if uploaded_file.name.endswith('.csv'):
-        df_raw = pd.read_csv(uploaded_file, sep=None, engine='python')
-    else:
-        df_raw = pd.read_excel(uploaded_file)
+    try:
+        if uploaded_file.name.endswith('.csv'):
+            df_raw = pd.read_csv(uploaded_file, sep=None, engine='python')
+        else:
+            df_raw = pd.read_excel(uploaded_file)
+    except Exception as e:
+        st.error(f"Dosya okuma hatası: {e}")
+        st.stop()
     
     # Veri Formatlama
     df_final = pd.DataFrame(columns=ISTENEN_SUTUNLAR)
+    
+    # Sütun Eşleştirme
     for col in ISTENEN_SUTUNLAR:
         match = [c for c in df_raw.columns if col[:4].lower() in c.lower()]
         if match:
             df_final[col] = df_raw[match[0]]
         else:
-            df_final[col] = ""
+            df_final[col] = "" # Eşleşmeyenleri boş string yap
             
     df_final["SIRA NO"] = range(1, len(df_final) + 1)
     
+    # KRİTİK DÜZELTME: Tüm NaN (boş) değerleri boş stringe çevir
+    # Bu satır "TypeError" hatasını çözer.
+    df_final = df_final.fillna("")
+    
+    st.success(f"{len(df_final)} satır veri başarıyla işlendi.")
     st.dataframe(df_final.head())
     
     col1, col2 = st.columns(2)
@@ -98,9 +109,9 @@ if uploaded_file:
         worksheet = writer.sheets['Rapor']
         
         # A4 YATAY ve SIĞDIRMA AYARLARI
-        worksheet.set_landscape() # Yatay
-        worksheet.set_paper(9)    # 9 = A4 Kağıdı
-        worksheet.fit_to_pages(1, 0) # Genişlik 1 sayfaya sığsın, uzunluk serbest (0)
+        worksheet.set_landscape() 
+        worksheet.set_paper(9)    # A4
+        worksheet.fit_to_pages(1, 0) # Genişlik 1 sayfaya sığsın
         worksheet.set_margins(left=0.2, right=0.2, top=0.5, bottom=0.5)
 
         # Stiller
@@ -109,7 +120,7 @@ if uploaded_file:
             'valign': 'vcenter', 
             'align': 'center', 
             'border': 1,
-            'font_size': 8 # Excel için okunabilir küçük font
+            'font_size': 8
         })
         
         header_format = workbook.add_format({
@@ -123,8 +134,7 @@ if uploaded_file:
         worksheet.merge_range('A2:AA2', f"{ilce_adi} İLÇE SAĞLIK MÜDÜRLÜĞÜ", title_format)
         worksheet.merge_range('A3:AA3', f"İTİRAZ DÖNEMİ : {donem}", title_format)
 
-        # Sütun Başlıkları ve Genişlikleri
-        # A4'e sığması için optimum genişlik oranları
+        # Sütun Genişlikleri
         column_widths = [
             4, 15, 8, 12, 10,  # Sıra, Asm, Birim, Dr, TC
             12, 12, 12, 10,    # Sebep, Konu, Kişi, TC
@@ -134,15 +144,17 @@ if uploaded_file:
         ]
 
         for i, width in enumerate(column_widths):
-            # Eğer listedeki sütun sayısı az gelirse varsayılan 8 yap
             w = width if i < len(column_widths) else 8
             worksheet.set_column(i, i, w)
             worksheet.write(4, i, df_final.columns[i], header_format)
 
-        # Veri Hücrelerine Wrap Formatı Uygula
+        # Veri Yazma (Hata Engelleyici Loop)
         for row_idx in range(len(df_final)):
             for col_idx in range(len(df_final.columns)):
                 cell_value = df_final.iloc[row_idx, col_idx]
+                # Boş değer kontrolü (fillna yapmamıza rağmen ekstra güvenlik)
+                if pd.isna(cell_value): 
+                    cell_value = ""
                 worksheet.write(row_idx + 5, col_idx, cell_value, text_wrap_format)
 
         # İmza Alanı
@@ -171,72 +183,47 @@ if uploaded_file:
         pdf = A4LandscapePDF(clean_text(ilce_adi), clean_text(donem))
         pdf.add_page()
         
-        # A4 Yatay Genişlik: ~287mm (Kenar boşlukları hariç)
-        # Sütun Genişliklerini Milimetre cinsinden tanımlıyoruz
-        # Toplam 27 sütun var. Toplamın 285mm'yi geçmemesi lazım.
+        # Sütun Genişlikleri (mm)
         col_ws = [
-            6,  # SIRA
-            20, # ASM
-            10, # BIRIM
-            18, # DR ADI
-            16, # DR TC
-            15, # SEBEP
-            15, # KONU
-            18, # KISI ADI
-            16, # KISI TC
-            5, 5, 5, 5, # IZLEMLER (4x5=20)
-            10, # DaBT uzun
-            5, 5, 5, 5, 5, 5, 5, 5, 5, # ASILAR (9x5=45)
-            6, 6, 8, # KABUL/RED/GEREKSIZ
-            30  # ACIKLAMA (Kalan pay)
+            6, 20, 10, 18, 16, # İlk 5
+            15, 15, 18, 16,    # Sonraki 4
+            5, 5, 5, 5,        # İzlemler
+            10, 5, 5, 5, 5, 5, 5, 5, 5, 5, # Aşılar
+            6, 6, 8, 30        # Sonuç
         ]
         
-        # Başlık Yazdırma
-        pdf.set_font('Arial', 'B', 5) # Font boyutu 5 olmak zorunda (Sığması için)
-        
-        # Tablo Header
-        max_h = 0
+        # Header Yazdır
+        pdf.set_font('Arial', 'B', 5)
         x_start = pdf.get_x()
         y_start = pdf.get_y()
-        
-        # Header'ı yazdır
         for i, header in enumerate(ISTENEN_SUTUNLAR):
-            # Header'da wrap gerekebilir mi? Evet.
-            # MultiCell kullanarak yüksekliği bulmuyoruz, header tek satır varsayalım veya manuel wrap
             pdf.set_xy(x_start + sum(col_ws[:i]), y_start)
             pdf.multi_cell(col_ws[i], 4, clean_text(header)[:15], 1, 'C')
+        pdf.ln(8)
         
-        pdf.ln(8) # Header yüksekliği manuel
-        
-        # Veri Yazdırma (Smart Row Logic)
+        # Veri Yazdır
         pdf.set_font('Arial', '', 5)
         
         for _, row in df_final.iterrows():
-            # 1. Bu satırın maksimum yüksekliğini hesapla
-            line_height = 3 # Her satırın yüksekliği 3mm
+            line_height = 3 
             max_lines = 1
             
-            # Tüm hücreleri kontrol et, en çok satır kaplayanı bul
+            # Satır yüksekliği hesapla
             for i, col_name in enumerate(ISTENEN_SUTUNLAR):
                 text = clean_text(row[col_name])
-                # FPDF'in get_string_width fonksiyonu ile genişliği ölç
                 width = pdf.get_string_width(text)
-                available_width = col_ws[i] - 1 # Biraz padding
+                available_width = col_ws[i] - 1
                 lines = (width / available_width)
-                if lines > max_lines:
-                    max_lines = int(lines) + 1
+                if lines > max_lines: max_lines = int(lines) + 1
             
-            # Maksimum satır sayısını 4 ile sınırla (Çok uzun açıklamalarda sayfa patlamasın)
             if max_lines > 5: max_lines = 5
-            
             current_row_height = max_lines * line_height
             
-            # Sayfa sonu kontrolü
+            # Sayfa Sonu Kontrolü
             if pdf.get_y() + current_row_height > 190:
                 pdf.add_page()
-                # Header tekrar
                 pdf.set_font('Arial', 'B', 5)
-                x_head = 5 # Margin left
+                x_head = 5
                 y_head = pdf.get_y()
                 for i, header in enumerate(ISTENEN_SUTUNLAR):
                     pdf.set_xy(x_head + sum(col_ws[:i]), y_head)
@@ -244,19 +231,15 @@ if uploaded_file:
                 pdf.ln(8)
                 pdf.set_font('Arial', '', 5)
 
-            # 2. Hücreleri Yazdır
-            x_curr = 5 # Margin left
+            # Hücreleri Yaz
+            x_curr = 5 
             y_curr = pdf.get_y()
             
             for i, col_name in enumerate(ISTENEN_SUTUNLAR):
                 text = clean_text(row[col_name])
                 pdf.set_xy(x_curr + sum(col_ws[:i]), y_curr)
-                # MultiCell ile metni kaydır (Wrap Text)
                 pdf.multi_cell(col_ws[i], line_height, text, 1, 'C')
-                # İmleci geri çekip kutuyu tamamla (Görsel düzgünlük için)
-                # (FPDF MultiCell sonrası imleci aşağı atar, biz yana geçmeliyiz, o yüzden x/y set ediyoruz)
             
-            # İmleci bir sonraki satıra hazırla
             pdf.set_y(y_curr + current_row_height)
         
         # İmza Alanı
@@ -265,7 +248,6 @@ if uploaded_file:
         pdf.set_font('Arial', 'B', 7)
         
         y_sig = pdf.get_y()
-        # Üyeler
         for i, member in enumerate(uyeler):
             x_pos = 10 + (i * 45)
             pdf.set_xy(x_pos, y_sig)
@@ -273,7 +255,6 @@ if uploaded_file:
             pdf.set_xy(x_pos, y_sig + 4)
             pdf.cell(40, 4, "Uye (Imza)", 0, 1, 'C')
             
-        # Başkan
         pdf.set_xy(130, y_sig + 15)
         pdf.cell(40, 4, clean_text(baskan), 0, 1, 'C')
         pdf.set_xy(130, y_sig + 19)
