@@ -22,7 +22,7 @@ AY_NO_MAP = {
     "TEMMUZ": "07", "AĞUSTOS": "08", "EYLÜL": "09", "EKİM": "10", "KASIM": "11", "ARALIK": "12"
 }
 
-# --- SÜTUN EŞLEŞTİRME ---
+# --- SÜTUN EŞLEŞTİRME (İTİRAZ KONUSU KALDIRILDI) ---
 COLUMN_MAPPING = {
     "SIRA NO": "OTOMATIK", 
     "ASM ADI": "ASM ADI",
@@ -30,7 +30,7 @@ COLUMN_MAPPING = {
     "HEKİM ADI SOYADI": "HEKİM ADI SOYADI",
     "HEKİM-ASÇ TC KİMLİK NO": "HEKİM-ASÇ TC KİMLİK NO",
     "İTİRAZ SEBEBİ": "İTİRAZ SEBEBİ",
-    "İTİRAZ KONUSU": "İTİRAZ NEDENİ",
+    # "İTİRAZ KONUSU": "İTİRAZ NEDENİ", <--- KALDIRILDI
     "İTİRAZ KONUSU KİŞİNİN ADI SOYADI": "İTİRAZ KONUSU KİŞİNİN ADI SOYADI",
     "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO": "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO",
     "GEBE İZLEM": "GEBE İZLEM", "LOHUSA İZLEM": "LOHUSA İZLEM", "BEBEK İZLEM": "BEBEK İZLEM", "ÇOCUK İZLEM": "ÇOCUK İZLEM",
@@ -56,7 +56,6 @@ with st.sidebar:
     secilen_ay = col_ay.selectbox("Ay", AYLAR, index=0)
     secilen_yil = col_yil.selectbox("Yıl", YILLAR, index=1)
     
-    # Başlık Mantığı
     if ilce_adi == "TÜMÜ":
         baslik_ilce = "İSTANBUL İL SAĞLIK MÜDÜRLÜĞÜ (GENEL)"
     else:
@@ -117,53 +116,65 @@ if uploaded_file:
     st.success(f"✅ {len(df_final)} Kayıt Hazırlandı.")
     st.info(f"📍 {baslik_ilce} - 📅 {baslik_donem}")
 
-    # --- EXCEL OLUŞTURMA (KOMPAKT) ---
+    # --- EXCEL OLUŞTURMA (TC OPTİMİZASYONU) ---
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
         df_final.to_excel(writer, sheet_name='Rapor', startrow=4, index=False)
         workbook = writer.book
         worksheet = writer.sheets['Rapor']
         
-        # --- SAYFA AYARLARI (SIKIŞTIRILMIŞ) ---
+        # Sayfa Ayarları (Sıkıştırılmış)
         worksheet.set_landscape()
         worksheet.set_paper(9) # A4
-        worksheet.fit_to_pages(1, 0) # Genişlik 1 sayfaya sığsın
-        # Kenar boşluklarını minimuma indirdik (0.1)
+        worksheet.fit_to_pages(1, 0)
         worksheet.set_margins(left=0.1, right=0.1, top=0.3, bottom=0.3)
         
-        # --- FORMATLAR (KÜÇÜLTÜLMÜŞ FONT) ---
-        # Veri satırları: Font 6 (Çok daha az yer kaplar)
-        fmt_wrap = workbook.add_format({
+        # --- FORMATLAR ---
+        # 1. Standart Hücre (Wrap Açık, Font 6)
+        fmt_std = workbook.add_format({
             'text_wrap': True, 'valign': 'vcenter', 'align': 'center', 'border': 1, 'font_size': 6
         })
-        # Başlık satırı: Font 7
+        # 2. TC Kimlik Hücresi (Wrap KAPALI, Font 7, Tek Satır Garantisi)
+        fmt_tc = workbook.add_format({
+            'text_wrap': False, 'valign': 'vcenter', 'align': 'center', 'border': 1, 'font_size': 7, 'num_format': '0'
+        })
+        
+        # Başlık Formatları
         fmt_head = workbook.add_format({
             'bold': True, 'align': 'center', 'bg_color': '#DDDDDD', 'border': 1, 'text_wrap': True, 'font_size': 7
         })
-        # Üst Başlık: Font 9
-        fmt_title = workbook.add_format({
-            'bold': True, 'align': 'center', 'font_size': 9
-        })
-        # İmzalar: Font 8
+        fmt_title = workbook.add_format({'bold': True, 'align': 'center', 'font_size': 9})
         fmt_imza_isim = workbook.add_format({'bold': True, 'align': 'center', 'font_size': 8})
         fmt_imza_unvan = workbook.add_format({'align': 'center', 'font_size': 7, 'italic': True})
 
-        # Başlıkları Yaz
-        worksheet.merge_range('A1:AA1', "AİLE HEKİMLİĞİ PERFORMANS İTİRAZ DEĞERLENDİRME TABLOSU", fmt_title)
-        worksheet.merge_range('A2:AA2', baslik_ilce, fmt_title)
-        worksheet.merge_range('A3:AA3', baslik_donem, fmt_title)
+        # Üst Başlıklar
+        worksheet.merge_range('A1:Z1', "AİLE HEKİMLİĞİ PERFORMANS İTİRAZ DEĞERLENDİRME TABLOSU", fmt_title)
+        worksheet.merge_range('A2:Z2', baslik_ilce, fmt_title)
+        worksheet.merge_range('A3:Z3', baslik_donem, fmt_title)
         
-        # Sütun Genişliklerini Ayarla (Opsiyonel: Daha dar sütunlar text-wrap'i tetikler ama font küçük olduğu için sığar)
-        worksheet.set_column('A:AA', 5) # Varsayılan dar genişlik
-        
-        # Veri Yazdırma
-        for i, col in enumerate(df_final.columns): worksheet.write(4, i, col, fmt_head)
+        # Sütun Genişliklerini Ayarla
+        # TC içeren sütunları genişlet, diğerlerini daralt
+        for i, col_name in enumerate(df_final.columns):
+            worksheet.write(4, i, col_name, fmt_head)
+            
+            if "TC" in col_name:
+                worksheet.set_column(i, i, 12) # TC'ler için genişlik (11 haneye sığar)
+            else:
+                worksheet.set_column(i, i, 5) # Diğerleri dar, aşağı kayabilir
+
+        # Veri Yazdırma (Format Kontrolü ile)
         for row_idx, row in df_final.iterrows():
-            for col_idx, val in enumerate(row): worksheet.write(row_idx+5, col_idx, val, fmt_wrap)
+            for col_idx, val in enumerate(row):
+                col_name = df_final.columns[col_idx]
+                
+                # Eğer sütun TC ise 'fmt_tc' kullan, değilse 'fmt_std'
+                current_fmt = fmt_tc if "TC" in col_name else fmt_std
+                
+                worksheet.write(row_idx+5, col_idx, val, current_fmt)
         
         # --- İMZA BLOĞU ---
         start_row = len(df_final) + 8
-        total_cols = 27 
+        total_cols = 26 # A-Z arası (Bir sütun eksildiği için 26 oldu)
         
         if uyeler:
             num_members = len(uyeler)
