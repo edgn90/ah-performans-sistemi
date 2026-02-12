@@ -2,12 +2,28 @@ import streamlit as st
 import pandas as pd
 from fpdf import FPDF
 import io
+import datetime
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="Hatasız İtiraz Raporu", layout="wide", page_icon="⚖️")
+st.set_page_config(page_title="Performans İtiraz Sistemi", layout="wide", page_icon="⚖️")
+
+# --- SABİT LİSTELER ---
+ISTANBUL_ILCELERI = [
+    "ADALAR", "ARNAVUTKÖY", "ATAŞEHİR", "AVCILAR", "BAĞCILAR", "BAHÇELİEVLER", "BAKIRKÖY", "BAŞAKŞEHİR",
+    "BAYRAMPAŞA", "BEŞİKTAŞ", "BEYKOZ", "BEYLİKDÜZÜ", "BEYOĞLU", "BÜYÜKÇEKMECE", "ÇATALCA", "ÇEKMEKÖY",
+    "ESENLER", "ESENYURT", "EYÜPSULTAN", "FATİH", "GAZİOSMANPAŞA", "GÜNGÖREN", "KADIKÖY", "KAĞITHANE",
+    "KARTAL", "KÜÇÜKÇEKMECE", "MALTEPE", "PENDİK", "SANCAKTEPE", "SARIYER", "SİLİVRİ", "SULTANBEYLİ",
+    "SULTANGAZİ", "ŞİLE", "ŞİŞLİ", "TUZLA", "ÜMRANİYE", "ÜSKÜDAR", "ZEYTİNBURNU"
+]
+
+AYLAR = [
+    "OCAK", "ŞUBAT", "MART", "NİSAN", "MAYIS", "HAZİRAN", 
+    "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM", "KASIM", "ARALIK"
+]
+
+YILLAR = [str(y) for y in range(2025, 2030)]
 
 # --- KESİN SÜTUN EŞLEŞTİRME HARİTASI ---
-# Sol: Rapordaki Başlık | Sağ: Excel'deki Başlık (Birebir aynı olmalı)
 COLUMN_MAPPING = {
     "SIRA NO": "OTOMATIK", 
     "ASM ADI": "ASM ADI",
@@ -15,7 +31,7 @@ COLUMN_MAPPING = {
     "HEKİM ADI SOYADI": "HEKİM ADI SOYADI",
     "HEKİM-ASÇ TC KİMLİK NO": "HEKİM-ASÇ TC KİMLİK NO",
     "İTİRAZ SEBEBİ": "İTİRAZ SEBEBİ",
-    "İTİRAZ KONUSU": "İTİRAZ NEDENİ", # Excel'de genellikle bu isimle gelir
+    "İTİRAZ KONUSU": "İTİRAZ NEDENİ",
     "İTİRAZ KONUSU KİŞİNİN ADI SOYADI": "İTİRAZ KONUSU KİŞİNİN ADI SOYADI",
     "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO": "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO",
     "GEBE İZLEM": "GEBE İZLEM",
@@ -38,48 +54,23 @@ COLUMN_MAPPING = {
     "KARAR AÇIKLAMASI": "KARAR AÇIKLAMASI"
 }
 
-# Çıktı sırası
 ISTENEN_SUTUNLAR = list(COLUMN_MAPPING.keys())
 
-# --- PDF BAŞLIK KISALTMALARI (A4 İÇİN) ---
+# --- PDF BAŞLIK KISALTMALARI ---
 PDF_BASLIK_MAP = {
-    "SIRA NO": "NO",
-    "ASM ADI": "ASM",
-    "HEKİM BİRİM NO": "BIRIM",
-    "HEKİM ADI SOYADI": "HEKIM",
-    "HEKİM-ASÇ TC KİMLİK NO": "DR TC",
-    "İTİRAZ SEBEBİ": "SEBEP",
-    "İTİRAZ KONUSU": "KONU",
-    "İTİRAZ KONUSU KİŞİNİN ADI SOYADI": "HASTA ADI",
-    "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO": "HASTA TC",
-    "GEBE İZLEM": "GB-IZ",
-    "LOHUSA İZLEM": "LH-IZ",
-    "BEBEK İZLEM": "BB-IZ",
-    "ÇOCUK İZLEM": "CC-IZ",
-    "DaBT-İPA-Hib-Hep-B": "6'LI ASI",
-    "HEP B": "HepB",
-    "BCG": "BCG",
-    "KKK": "KKK",
-    "HEP A": "HepA",
-    "KPA": "KPA",
-    "OPA": "OPA",
-    "SUÇİÇEĞİ": "CICEK",
-    "DaBT-İPA": "4LU-ASI",
-    "TD": "TD",
-    "KABUL": "KBL",
-    "RED": "RED",
-    "GEREKSİZ BAŞVURU": "GER.BSV",
-    "KARAR AÇIKLAMASI": "ACIKLAMA"
+    "SIRA NO": "NO", "ASM ADI": "ASM", "HEKİM BİRİM NO": "BIRIM", "HEKİM ADI SOYADI": "HEKIM",
+    "HEKİM-ASÇ TC KİMLİK NO": "DR TC", "İTİRAZ SEBEBİ": "SEBEP", "İTİRAZ KONUSU": "KONU",
+    "İTİRAZ KONUSU KİŞİNİN ADI SOYADI": "HASTA ADI", "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO": "HASTA TC",
+    "GEBE İZLEM": "GB-IZ", "LOHUSA İZLEM": "LH-IZ", "BEBEK İZLEM": "BB-IZ", "ÇOCUK İZLEM": "CC-IZ",
+    "DaBT-İPA-Hib-Hep-B": "6'LI ASI", "HEP B": "HepB", "BCG": "BCG", "KKK": "KKK", "HEP A": "HepA",
+    "KPA": "KPA", "OPA": "OPA", "SUÇİÇEĞİ": "CICEK", "DaBT-İPA": "4LU-ASI", "TD": "TD",
+    "KABUL": "KBL", "RED": "RED", "GEREKSİZ BAŞVURU": "GER.BSV", "KARAR AÇIKLAMASI": "ACIKLAMA"
 }
 
 def clean_text(text):
     if pd.isna(text): return ""
     text = str(text)
-    replacements = {
-        'ğ': 'g', 'Ğ': 'G', 'ü': 'u', 'Ü': 'U', 'ş': 's', 'Ş': 'S',
-        'ı': 'i', 'İ': 'I', 'ö': 'o', 'Ö': 'O', 'ç': 'c', 'Ç': 'C',
-        '\n': ' ', '\r': ''
-    }
+    replacements = {'ğ': 'g', 'Ğ': 'G', 'ü': 'u', 'Ü': 'U', 'ş': 's', 'Ş': 'S', 'ı': 'i', 'İ': 'I', 'ö': 'o', 'Ö': 'O', 'ç': 'c', 'Ç': 'C', '\n': ' ', '\r': ''}
     for search, replace in replacements.items():
         text = text.replace(search, replace)
     return text
@@ -103,92 +94,93 @@ class A4LandscapePDF(FPDF):
         self.cell(0, 8, f'Sayfa {self.page_no()}', 0, 0, 'C')
 
 # --- ANA UYGULAMA ---
-st.title("⚖️ Doğrulanmış İtiraz Rapor Sistemi")
+st.title("⚖️ Performans İtiraz Rapor Paneli")
 
+# --- SOL MENÜ TASARIMI ---
 with st.sidebar:
-    st.header("📝 Evrak Bilgileri")
-    ilce_adi = st.text_input("İlçe Adı", "UMRANIYE").upper()
-    donem = st.text_input("Dönem", "OCAK / 2026")
+    # 1. DOSYA YÜKLEME (EN ÜSTTE)
+    st.header("📂 Veri Girişi")
+    uploaded_file = st.file_uploader("DOSYA YÜKLE (Excel)", type=['xlsx'])
     st.markdown("---")
-    st.header("✍️ Komisyon Üyeleri")
-    baskan = st.text_input("Komisyon Başkanı", "Dr. Adı Soyadı")
-    uyeler = []
-    for i in range(1, 7):
-        uye = st.text_input(f"Üye {i}", f"Üye {i}")
-        if uye: uyeler.append(uye)
-    uploaded_file = st.file_uploader("Veri Dosyası (Excel)", type=['xlsx'])
 
+    # 2. RAPOR AYARLARI
+    st.header("⚙️ Rapor Ayarları")
+    
+    # İlçe Seçimi (Dropdown)
+    ilce_adi = st.selectbox("İlçe Seçiniz", ISTANBUL_ILCELERI, index=36) # Default: Ümraniye
+    
+    # Tarih Seçimi (Yan yana)
+    col_ay, col_yil = st.columns(2)
+    secilen_ay = col_ay.selectbox("Ay", AYLAR)
+    secilen_yil = col_yil.selectbox("Yıl", YILLAR, index=1) # Default: 2026
+    
+    donem = f"{secilen_ay} / {secilen_yil}"
+    
+    st.markdown("---")
+
+    # 3. KOMİSYON BİLGİLERİ (AKORDEON PANEL)
+    with st.expander("📝 KOMİSYON BİLGİLERİ", expanded=False):
+        st.caption("Raporun altında çıkacak imzalar")
+        baskan = st.text_input("Komisyon Başkanı", "Dr. Adı Soyadı")
+        st.markdown("---")
+        uyeler = []
+        for i in range(1, 6):
+            uye = st.text_input(f"{i}. Üye Adı Soyadı", key=f"uye_{i}")
+            if uye: uyeler.append(uye)
+
+# --- ANA EKRAN İŞLEMLERİ ---
 if uploaded_file:
     try:
         df_raw = pd.read_excel(uploaded_file)
     except:
-        st.error("Excel dosyası okunamadı.")
+        st.error("Dosya formatı hatalı veya okunamadı.")
         st.stop()
     
-    # --- VERİ İŞLEME ---
+    # --- VERİ EŞLEŞTİRME VE TEMİZLEME ---
     df_final = pd.DataFrame()
-    
     for target_col, source_col in COLUMN_MAPPING.items():
         if target_col == "SIRA NO": continue
-        
-        # Sütun bulma mantığı
         found_col = None
         for col in df_raw.columns:
-            # 1. Tam Eşleşme
-            if source_col.lower() == col.lower():
-                found_col = col
-                break
-            # 2. Boşluksuz Eşleşme (SU ÇİÇEĞİ vs SUÇİÇEĞİ)
-            if source_col.replace(" ","").lower() == col.replace(" ","").lower():
-                found_col = col
-                break
-                
-        if found_col:
-            df_final[target_col] = df_raw[found_col]
-        else:
-            df_final[target_col] = "" # Bulunamayan sütun boş kalsın
+            if source_col.lower() == col.lower(): found_col = col; break
+            if source_col.replace(" ","").lower() == col.replace(" ","").lower(): found_col = col; break
+        if found_col: df_final[target_col] = df_raw[found_col]
+        else: df_final[target_col] = ""
 
     df_final["SIRA NO"] = range(1, len(df_final) + 1)
-    df_final = df_final[ISTENEN_SUTUNLAR] # Sıralamayı düzelt
-    df_final = df_final.fillna("") # NaN temizliği
+    df_final = df_final[ISTENEN_SUTUNLAR]
+    df_final = df_final.fillna("")
     
-    st.success(f"{len(df_final)} satır veri işlendi.")
-    st.dataframe(df_final.head())
+    st.success(f"✅ {len(df_final)} Kayıt Başarıyla İşlendi.")
+    st.info(f"📍 {ilce_adi} - 📅 {donem} dönemi için rapor hazırlanıyor.")
     
+    # Önizleme
+    with st.expander("🔍 Veri Önizlemesi (İlk 5 Satır)"):
+        st.dataframe(df_final.head())
+
     col1, col2 = st.columns(2)
 
-    # --- 1. EXCEL ÇIKTISI ---
+    # --- 1. EXCEL OLUŞTURMA ---
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
         df_final.to_excel(writer, sheet_name='Rapor', startrow=4, index=False)
-        
-        # --- EKLENEN DÜZELTME: workbook TANIMI ---
-        workbook = writer.book  # <--- HATA BURADAYDI, DÜZELTİLDİ
+        workbook = writer.book
         worksheet = writer.sheets['Rapor']
-        
-        worksheet.set_landscape()
-        worksheet.set_paper(9)
-        worksheet.fit_to_pages(1, 0)
+        worksheet.set_landscape(); worksheet.set_paper(9); worksheet.fit_to_pages(1, 0)
         worksheet.set_margins(0.2, 0.2, 0.5, 0.5)
         
-        # Formatlar
         fmt_wrap = workbook.add_format({'text_wrap': True, 'valign': 'vcenter', 'align': 'center', 'border': 1, 'font_size': 7})
         fmt_head = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#DDDDDD', 'border': 1, 'text_wrap': True, 'font_size': 8})
         fmt_title = workbook.add_format({'bold': True, 'align': 'center', 'font_size': 11})
 
-        # Başlıklar
         worksheet.merge_range('A1:AA1', "AİLE HEKİMLİĞİ PERFORMANS İTİRAZ DEĞERLENDİRME TABLOSU", fmt_title)
         worksheet.merge_range('A2:AA2', f"{ilce_adi} İLÇE SAĞLIK MÜDÜRLÜĞÜ", fmt_title)
         worksheet.merge_range('A3:AA3', f"DÖNEM: {donem}", fmt_title)
         
-        for i, col in enumerate(df_final.columns):
-            worksheet.write(4, i, col, fmt_head)
-            
+        for i, col in enumerate(df_final.columns): worksheet.write(4, i, col, fmt_head)
         for row_idx, row in df_final.iterrows():
-            for col_idx, val in enumerate(row):
-                worksheet.write(row_idx+5, col_idx, val, fmt_wrap)
+            for col_idx, val in enumerate(row): worksheet.write(row_idx+5, col_idx, val, fmt_wrap)
         
-        # İmza Bloğu
         last_row = len(df_final) + 8
         for i, u in enumerate(uyeler):
             worksheet.write(last_row, 1 + (i*3), u)
@@ -197,77 +189,59 @@ if uploaded_file:
         worksheet.write(last_row+5, 10, "Komisyon Bşk. İmza")
 
     with col1:
-        st.download_button("📗 Excel İndir", excel_buffer.getvalue(), "Rapor.xlsx")
+        st.download_button("📗 Excel Raporunu İndir", excel_buffer.getvalue(), f"{ilce_adi}_Rapor.xlsx", use_container_width=True)
 
-    # --- 2. PDF ÇIKTISI ---
+    # --- 2. PDF OLUŞTURMA ---
     try:
         pdf = A4LandscapePDF(clean_text(ilce_adi), clean_text(donem))
         pdf.add_page()
-        
-        # Sütun Genişlikleri
         col_ws = [5, 18, 9, 18, 14, 12, 12, 18, 14, 5, 5, 5, 5, 8, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 8, 28]
         
-        # Header
         pdf.set_font('Arial', 'B', 5)
-        x_start = 3
-        y_start = pdf.get_y()
+        x_start = 3; y_start = pdf.get_y()
         for i, col in enumerate(ISTENEN_SUTUNLAR):
             kisa_baslik = clean_text(PDF_BASLIK_MAP.get(col, col))
             pdf.set_xy(x_start + sum(col_ws[:i]), y_start)
             pdf.cell(col_ws[i], 4, kisa_baslik, 1, 0, 'C')
         pdf.ln(4)
         
-        # Data
         pdf.set_font('Arial', '', 5)
         for _, row in df_final.iterrows():
-            line_height = 2.5
-            max_lines = 1
-            # Satır yüksekliği hesapla
+            line_height = 2.5; max_lines = 1
             for i, col in enumerate(ISTENEN_SUTUNLAR):
-                text = clean_text(row[col])
-                width = pdf.get_string_width(text)
+                width = pdf.get_string_width(clean_text(row[col]))
                 if width > (col_ws[i]-1):
                     lines = (width / (col_ws[i]-1)) + 1
                     if lines > max_lines: max_lines = int(lines)
             if max_lines > 4: max_lines = 4
             curr_h = max_lines * line_height
             
-            # Sayfa Sonu
             if pdf.get_y() + curr_h > 195:
-                pdf.add_page()
-                pdf.set_font('Arial', 'B', 5)
+                pdf.add_page(); pdf.set_font('Arial', 'B', 5)
                 for i, col in enumerate(ISTENEN_SUTUNLAR):
                     kisa_baslik = clean_text(PDF_BASLIK_MAP.get(col, col))
                     pdf.set_xy(x_start + sum(col_ws[:i]), pdf.get_y())
                     pdf.cell(col_ws[i], 4, kisa_baslik, 1, 0, 'C')
-                pdf.ln(4)
-                pdf.set_font('Arial', '', 5)
+                pdf.ln(4); pdf.set_font('Arial', '', 5)
 
             y_curr = pdf.get_y()
             for i, col in enumerate(ISTENEN_SUTUNLAR):
-                text = clean_text(row[col])
                 pdf.set_xy(x_start + sum(col_ws[:i]), y_curr)
-                pdf.multi_cell(col_ws[i], line_height, text, 1, 'C')
+                pdf.multi_cell(col_ws[i], line_height, clean_text(row[col]), 1, 'C')
             pdf.set_y(y_curr + curr_h)
 
-        # İmza
         if pdf.get_y() > 180: pdf.add_page()
-        pdf.ln(5)
-        pdf.set_font('Arial', 'B', 7)
-        y_sig = pdf.get_y()
+        pdf.ln(5); pdf.set_font('Arial', 'B', 7); y_sig = pdf.get_y()
         for i, m in enumerate(uyeler):
-            pdf.set_xy(10+(i*40), y_sig)
-            pdf.cell(35, 4, clean_text(m), 0, 1, 'C')
-            pdf.set_xy(10+(i*40), y_sig+4)
-            pdf.cell(35, 4, "Imza", 0, 1, 'C')
-        
-        pdf.set_xy(130, y_sig+15)
-        pdf.cell(40, 4, clean_text(baskan), 0, 1, 'C')
-        pdf.set_xy(130, y_sig+19)
-        pdf.cell(40, 4, "Komisyon Bsk. Imza", 0, 1, 'C')
+            pdf.set_xy(10+(i*40), y_sig); pdf.cell(35, 4, clean_text(m), 0, 1, 'C')
+            pdf.set_xy(10+(i*40), y_sig+4); pdf.cell(35, 4, "Imza", 0, 1, 'C')
+        pdf.set_xy(130, y_sig+15); pdf.cell(40, 4, clean_text(baskan), 0, 1, 'C')
+        pdf.set_xy(130, y_sig+19); pdf.cell(40, 4, "Komisyon Bsk. Imza", 0, 1, 'C')
 
         with col2:
-            st.download_button("📕 PDF İndir", pdf.output(dest='S').encode('latin-1', 'ignore'), "Rapor_A4.pdf")
+            st.download_button("📕 PDF Raporunu İndir", pdf.output(dest='S').encode('latin-1', 'ignore'), f"{ilce_adi}_Rapor.pdf", use_container_width=True)
 
     except Exception as e:
         st.error(f"Hata: {e}")
+else:
+    st.info("👈 Rapor oluşturmak için lütfen sol menüden Excel dosyanızı yükleyiniz.")
