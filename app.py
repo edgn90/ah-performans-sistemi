@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import io
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Performans İtiraz Yönetim Paneli", layout="wide", page_icon="📊")
@@ -84,7 +85,7 @@ if uploaded_file:
         return (s != '').sum()
 
     def count_contains(df, col_keywords, search_term):
-        """Belirli bir sütunda kelime arar"""
+        """Belirli bir sütunda kelime arar (Satır bazlı sayar, tekrarları önemsemez)"""
         col_name = next((col for col in df.columns if any(k in col.upper() for k in col_keywords)), None)
         if not col_name: return 0
         
@@ -92,6 +93,8 @@ if uploaded_file:
         s = df[col_name].astype(str).str.upper().str.replace('İ', 'I').str.replace('Ğ', 'G').str.replace('Ü', 'U').str.replace('Ş', 'S').str.replace('Ö', 'O').str.replace('Ç', 'C')
         search_term = search_term.upper().replace('İ', 'I').replace('Ğ', 'G').replace('Ü', 'U').replace('Ş', 'S').replace('Ö', 'O').replace('Ç', 'C')
         
+        # str.contains zaten satır başına True/False döndürür.
+        # Yani bir satırda 3 kere "Telefon" yazsa bile sonuç True olur ve 1 sayılır.
         return s.str.contains(search_term, na=False).sum()
 
     # =========================================================================
@@ -122,6 +125,7 @@ if uploaded_file:
     with col_asm:
         st.info("📝 **ASM Onam Durumu**")
         asm_onam_keywords = ["ASM ONAM", "ONAM"]
+        # count_contains fonksiyonu satır bazlı çalıştığı için, aynı hücrede tekrar edenleri zaten 1 sayar.
         count_imzali = count_contains(df_filtered, asm_onam_keywords, "IMZALI RED")
         count_imtina = count_contains(df_filtered, asm_onam_keywords, "IMTINA")
         
@@ -165,49 +169,52 @@ if uploaded_file:
 
     st.markdown("---")
 
-    # --- 3. RED NEDENLERİ ANALİZİ (BÖLÜNMÜŞ VE BİRLEŞTİRİLMİŞ) ---
+    # --- 3. RED NEDENLERİ ANALİZİ (GELİŞMİŞ TEKİLLEŞTİRME) ---
     st.subheader("🚫 Red Nedenleri Analizi (ASM + İlçe Sağlık)")
     
-    # İlgili sütunları bul
     col_asm_red = next((col for col in df_filtered.columns if "ASM RED" in col.upper()), None)
     col_ilce_red = next((col for col in df_filtered.columns if "İLÇE SAĞLIK RED" in col.upper() or "İLÇE RED" in col.upper()), None)
 
     all_red_reasons = []
 
-    def process_and_add_reasons(df, col_name, target_list):
+    def process_and_add_reasons_deduplicated(df, col_name, target_list):
         if col_name and col_name in df.columns:
-            # Sütundaki tüm verileri string olarak al ve NaN'ları at
+            # Sütundaki tüm verileri al
             raw_list = df[col_name].dropna().astype(str).tolist()
             
             for item in raw_list:
                 # 1. '|' işaretine göre böl
                 parts = item.split('|')
                 
+                # 2. SATIR BAZLI TEKİLLEŞTİRME (Set kullanarak)
+                # Aynı hücrede "Gerekçesiz | Gerekçesiz" yazıyorsa 1 kere say.
+                unique_reasons_in_row = set()
+                
                 for part in parts:
-                    # 2. Temizle
                     clean_part = part.strip()
-                    # 3. Anlamsız verileri filtrele (Nan, 0, -, boşluk)
+                    # Anlamsız verileri temizle
                     if len(clean_part) > 2 and clean_part.lower() not in ['nan', 'none', '0', '-', 'yok']:
-                        target_list.append(clean_part)
+                        unique_reasons_in_row.add(clean_part)
+                
+                # 3. Tekilleştirilmiş listeyi ana havuza ekle
+                target_list.extend(list(unique_reasons_in_row))
 
     # Her iki sütunu da işle
-    process_and_add_reasons(df_filtered, col_asm_red, all_red_reasons)
-    process_and_add_reasons(df_filtered, col_ilce_red, all_red_reasons)
+    process_and_add_reasons_deduplicated(df_filtered, col_asm_red, all_red_reasons)
+    process_and_add_reasons_deduplicated(df_filtered, col_ilce_red, all_red_reasons)
 
     if all_red_reasons:
-        # Pandas Serisine çevirip saydır
         red_series = pd.Series(all_red_reasons)
         red_counts = red_series.value_counts().reset_index()
         red_counts.columns = ["Red Nedeni", "Sayı"]
         
-        # İlk 15 Nedeni Göster (Liste uzayabilir)
         top_red_reasons = red_counts.head(15)
         
         col_r1, col_r2 = st.columns([2, 1])
         
         with col_r1:
              fig_red = px.pie(top_red_reasons, values='Sayı', names='Red Nedeni', 
-                              title='En Sık Karşılaşılan Red Nedenleri', hole=0.4)
+                              title='En Sık Karşılaşılan Red Nedenleri (Satır Bazlı Tekil)', hole=0.4)
              st.plotly_chart(fig_red, use_container_width=True)
              
         with col_r2:
