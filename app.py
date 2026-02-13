@@ -165,7 +165,7 @@ if uploaded_file:
 
     st.markdown("---")
 
-    # --- 3. RED NEDENLERİ ANALİZİ (BİRLEŞTİRİLMİŞ) ---
+    # --- 3. RED NEDENLERİ ANALİZİ (BÖLÜNMÜŞ VE BİRLEŞTİRİLMİŞ) ---
     st.subheader("🚫 Red Nedenleri Analizi (ASM + İlçe Sağlık)")
     
     # İlgili sütunları bul
@@ -174,17 +174,25 @@ if uploaded_file:
 
     all_red_reasons = []
 
-    if col_asm_red:
-        # Boş olmayanları al, listeye ekle
-        reasons = df_filtered[col_asm_red].dropna().astype(str).tolist()
-        # 'nan', '0', '-' gibi anlamsız verileri temizle
-        reasons = [r.strip() for r in reasons if len(r.strip()) > 2 and r.lower() not in ['nan', 'none', '0']]
-        all_red_reasons.extend(reasons)
+    def process_and_add_reasons(df, col_name, target_list):
+        if col_name and col_name in df.columns:
+            # Sütundaki tüm verileri string olarak al ve NaN'ları at
+            raw_list = df[col_name].dropna().astype(str).tolist()
+            
+            for item in raw_list:
+                # 1. '|' işaretine göre böl
+                parts = item.split('|')
+                
+                for part in parts:
+                    # 2. Temizle
+                    clean_part = part.strip()
+                    # 3. Anlamsız verileri filtrele (Nan, 0, -, boşluk)
+                    if len(clean_part) > 2 and clean_part.lower() not in ['nan', 'none', '0', '-', 'yok']:
+                        target_list.append(clean_part)
 
-    if col_ilce_red:
-        reasons = df_filtered[col_ilce_red].dropna().astype(str).tolist()
-        reasons = [r.strip() for r in reasons if len(r.strip()) > 2 and r.lower() not in ['nan', 'none', '0']]
-        all_red_reasons.extend(reasons)
+    # Her iki sütunu da işle
+    process_and_add_reasons(df_filtered, col_asm_red, all_red_reasons)
+    process_and_add_reasons(df_filtered, col_ilce_red, all_red_reasons)
 
     if all_red_reasons:
         # Pandas Serisine çevirip saydır
@@ -192,21 +200,22 @@ if uploaded_file:
         red_counts = red_series.value_counts().reset_index()
         red_counts.columns = ["Red Nedeni", "Sayı"]
         
-        # İlk 10 Nedeni Göster
-        top_red_reasons = red_counts.head(10)
+        # İlk 15 Nedeni Göster (Liste uzayabilir)
+        top_red_reasons = red_counts.head(15)
         
         col_r1, col_r2 = st.columns([2, 1])
         
         with col_r1:
              fig_red = px.pie(top_red_reasons, values='Sayı', names='Red Nedeni', 
-                              title='En Sık Karşılaşılan Red Nedenleri (İlk 10)', hole=0.4)
+                              title='En Sık Karşılaşılan Red Nedenleri', hole=0.4)
              st.plotly_chart(fig_red, use_container_width=True)
              
         with col_r2:
-            st.dataframe(red_counts, use_container_width=True, height=350)
+            st.write("**Detaylı Liste**")
+            st.dataframe(red_counts, use_container_width=True, height=350, hide_index=True)
             
     else:
-        st.info("Red nedeni içeren veri bulunamadı.")
+        st.info("Red nedeni içeren veri bulunamadı veya sütun isimleri eşleşmedi.")
 
     st.markdown("---")
 
