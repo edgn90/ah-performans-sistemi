@@ -85,7 +85,7 @@ if uploaded_file:
         return (s != '').sum()
 
     def count_contains(df, col_keywords, search_term):
-        """Belirli bir sütunda kelime arar (Satır bazlı sayar, tekrarları önemsemez)"""
+        """Belirli bir sütunda kelime arar"""
         col_name = next((col for col in df.columns if any(k in col.upper() for k in col_keywords)), None)
         if not col_name: return 0
         
@@ -93,8 +93,6 @@ if uploaded_file:
         s = df[col_name].astype(str).str.upper().str.replace('İ', 'I').str.replace('Ğ', 'G').str.replace('Ü', 'U').str.replace('Ş', 'S').str.replace('Ö', 'O').str.replace('Ç', 'C')
         search_term = search_term.upper().replace('İ', 'I').replace('Ğ', 'G').replace('Ü', 'U').replace('Ş', 'S').replace('Ö', 'O').replace('Ç', 'C')
         
-        # str.contains zaten satır başına True/False döndürür.
-        # Yani bir satırda 3 kere "Telefon" yazsa bile sonuç True olur ve 1 sayılır.
         return s.str.contains(search_term, na=False).sum()
 
     # =========================================================================
@@ -125,7 +123,6 @@ if uploaded_file:
     with col_asm:
         st.info("📝 **ASM Onam Durumu**")
         asm_onam_keywords = ["ASM ONAM", "ONAM"]
-        # count_contains fonksiyonu satır bazlı çalıştığı için, aynı hücrede tekrar edenleri zaten 1 sayar.
         count_imzali = count_contains(df_filtered, asm_onam_keywords, "IMZALI RED")
         count_imtina = count_contains(df_filtered, asm_onam_keywords, "IMTINA")
         
@@ -169,39 +166,39 @@ if uploaded_file:
 
     st.markdown("---")
 
-    # --- 3. RED NEDENLERİ ANALİZİ (GELİŞMİŞ TEKİLLEŞTİRME) ---
-    st.subheader("🚫 Red Nedenleri Analizi (ASM + İlçe Sağlık)")
+    # --- 3. RED NEDENLERİ ANALİZİ (SATIR BAZLI %100 TEKİLLEŞTİRME) ---
+    st.subheader("🚫 Red Nedenleri Analizi")
     
     col_asm_red = next((col for col in df_filtered.columns if "ASM RED" in col.upper()), None)
     col_ilce_red = next((col for col in df_filtered.columns if "İLÇE SAĞLIK RED" in col.upper() or "İLÇE RED" in col.upper()), None)
 
     all_red_reasons = []
 
-    def process_and_add_reasons_deduplicated(df, col_name, target_list):
-        if col_name and col_name in df.columns:
-            # Sütundaki tüm verileri al
-            raw_list = df[col_name].dropna().astype(str).tolist()
-            
-            for item in raw_list:
-                # 1. '|' işaretine göre böl
-                parts = item.split('|')
-                
-                # 2. SATIR BAZLI TEKİLLEŞTİRME (Set kullanarak)
-                # Aynı hücrede "Gerekçesiz | Gerekçesiz" yazıyorsa 1 kere say.
-                unique_reasons_in_row = set()
-                
-                for part in parts:
-                    clean_part = part.strip()
-                    # Anlamsız verileri temizle
-                    if len(clean_part) > 2 and clean_part.lower() not in ['nan', 'none', '0', '-', 'yok']:
-                        unique_reasons_in_row.add(clean_part)
-                
-                # 3. Tekilleştirilmiş listeyi ana havuza ekle
-                target_list.extend(list(unique_reasons_in_row))
+    # Veri setini satır satır gez
+    for index, row in df_filtered.iterrows():
+        # Bu satır (kişi) için geçici bir küme (set) oluştur
+        reasons_in_this_row = set()
+        
+        # 1. ASM Red Nedenini Al
+        if col_asm_red and pd.notna(row[col_asm_red]):
+            val = str(row[col_asm_red])
+            parts = val.split('|')
+            for part in parts:
+                clean = part.strip()
+                if len(clean) > 2 and clean.lower() not in ['nan', 'none', '0', '-', 'yok']:
+                    reasons_in_this_row.add(clean) # Kümeye ekle (Tekrarı önler)
 
-    # Her iki sütunu da işle
-    process_and_add_reasons_deduplicated(df_filtered, col_asm_red, all_red_reasons)
-    process_and_add_reasons_deduplicated(df_filtered, col_ilce_red, all_red_reasons)
+        # 2. İlçe Red Nedenini Al (Aynı kişiye ait)
+        if col_ilce_red and pd.notna(row[col_ilce_red]):
+            val = str(row[col_ilce_red])
+            parts = val.split('|')
+            for part in parts:
+                clean = part.strip()
+                if len(clean) > 2 and clean.lower() not in ['nan', 'none', '0', '-', 'yok']:
+                    reasons_in_this_row.add(clean) # Kümeye ekle
+
+        # 3. Bu kişinin tekilleştirilmiş nedenlerini ana listeye ekle
+        all_red_reasons.extend(list(reasons_in_this_row))
 
     if all_red_reasons:
         red_series = pd.Series(all_red_reasons)
@@ -214,7 +211,7 @@ if uploaded_file:
         
         with col_r1:
              fig_red = px.pie(top_red_reasons, values='Sayı', names='Red Nedeni', 
-                              title='En Sık Karşılaşılan Red Nedenleri (Satır Bazlı Tekil)', hole=0.4)
+                              title='En Sık Karşılaşılan Red Nedenleri (Kişi Bazlı Tekil)', hole=0.4)
              st.plotly_chart(fig_red, use_container_width=True)
              
         with col_r2:
