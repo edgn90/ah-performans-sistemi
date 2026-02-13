@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
-import plotly.express as px # Grafikler için gerekli kütüphane
+import plotly.express as px
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Performans İtiraz Sistemi", layout="wide", page_icon="⚖️")
@@ -92,10 +92,12 @@ if uploaded_file:
         st.stop()
     
     # --- FİLTRELEME ---
+    # 1. İlçe Filtresi
     if ilce_adi != "TÜMÜ":
         ilce_col = next((col for col in df_raw.columns if "İLÇE" in col.upper()), None)
         if ilce_col: df_raw = df_raw[df_raw[ilce_col] == ilce_adi]
 
+    # 2. Dönem Filtresi
     if secilen_ay != "TÜMÜ":
         hedef_donem = f"{secilen_yil}-{AY_NO_MAP[secilen_ay]}"
         donem_col = next((col for col in df_raw.columns if "DÖNEM" in col.upper() or "PERFORMANS" in col.upper()), None)
@@ -105,7 +107,7 @@ if uploaded_file:
         st.error("⚠️ Seçilen filtrelere uygun kayıt bulunamadı.")
         st.stop()
 
-    # --- VERİ HAZIRLAMA ---
+    # --- VERİ HAZIRLAMA (EXCEL İÇİN) ---
     df_final = pd.DataFrame()
     for target_col, source_col in COLUMN_MAPPING.items():
         if target_col == "SIRA": continue
@@ -119,21 +121,18 @@ if uploaded_file:
     df_final["SIRA"] = range(1, len(df_final) + 1)
     df_final = df_final[ISTENEN_SUTUNLAR]
     
-    # Sayısal olmayan değerleri temizle (NaN -> Boş String) - Excel çıktısı için
+    # Sayısal olmayan değerleri temizle (Excel çıktısı için)
     df_excel = df_final.fillna("")
-    
-    # Analiz için sayısal verileri temizle (Grafikler için)
-    # Aşı/İzlem sütunlarındaki değerleri sayıya çevirmeyi dene veya dolu mu diye bak
     
     st.success(f"✅ {len(df_final)} Kayıt İşlendi.")
     
     # =========================================================================
-    # TAB YAPISI (SEKMELER)
+    # TAB YAPISI
     # =========================================================================
     tab1, tab2 = st.tabs(["📄 Resmi Rapor İndir", "📊 Grafik ve İstatistikler"])
 
     # -------------------------------------------------------------------------
-    # SEKME 1: EXCEL OLUŞTURMA (Mevcut Kod)
+    # SEKME 1: EXCEL OLUŞTURMA
     # -------------------------------------------------------------------------
     with tab1:
         st.info(f"📍 {baslik_ilce} - 📅 {baslik_donem}")
@@ -144,7 +143,7 @@ if uploaded_file:
             workbook = writer.book
             worksheet = writer.sheets['Rapor']
             
-            # Ayarlar
+            # Ayarlar (Kompakt)
             worksheet.set_landscape()
             worksheet.set_paper(9) # A4
             worksheet.fit_to_pages(1, 0)
@@ -164,7 +163,7 @@ if uploaded_file:
             worksheet.merge_range('A2:Z2', baslik_ilce, fmt_title)
             worksheet.merge_range('A3:Z3', baslik_donem, fmt_title)
             
-            # Sütunlar
+            # Sütun Genişlikleri
             column_widths = {
                 "SIRA": 3, "ASM ADI": 12, "HEKİM BİRİM NO": 7, "HEKİM ADI SOYADI": 12, "HEKİM-ASÇ TC KİMLİK NO": 11,
                 "İTİRAZ SEBEBİ": 15, "İTİRAZ KONUSU KİŞİNİN ADI SOYADI": 12, "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO": 11,
@@ -182,10 +181,8 @@ if uploaded_file:
                     current_fmt = fmt_tc if "TC" in df_excel.columns[col_idx] else fmt_std
                     worksheet.write(row_idx+5, col_idx, val, current_fmt)
             
-            # İmza Bloğu
+            # İmza Bloğu (Sabit Bloklama)
             start_row = len(df_excel) + 8
-            
-            # Üyeler (Eşit Bloklama)
             signature_ranges = [(0, 3), (4, 7), (8, 11), (12, 16), (17, 20), (21, 25)]
             
             if uyeler:
@@ -214,74 +211,70 @@ if uploaded_file:
         )
 
     # -------------------------------------------------------------------------
-    # SEKME 2: GRAFİK VE ANALİZ (Yeni Eklendi)
+    # SEKME 2: GRAFİK VE ANALİZ
     # -------------------------------------------------------------------------
     with tab2:
-        st.subheader("📊 İtiraz Verileri Özet Paneli")
+        st.subheader("📊 İtiraz ve İzlem Analiz Paneli")
         
-        # 1. KPI KARTLARI (ÖZET SAYILAR)
-        # Kabul, Red ve Gereksiz Başvuru sütunları genellikle doluysa sayılır.
-        # Bu sütunlardaki dolu hücre sayılarını alıyoruz.
-        total_basvuru = len(df_final)
-        total_kabul = df_final["KABUL"].notna().sum() - (df_final["KABUL"] == "").sum() # Boş string olmayanlar
-        total_red = df_final["RED"].notna().sum() - (df_final["RED"] == "").sum()
-        total_gereksiz = df_final["GEREKSİZ BAŞVURU"].notna().sum() - (df_final["GEREKSİZ BAŞVURU"] == "").sum()
+        # --- 1. İZLEM TÜRLERİ SAYILARI (KPI) ---
+        # Sütunlarda dolu olan hücreleri sayıyoruz
+        # (Sadece boş olmayan ve NaN olmayanlar itiraz sayılır)
         
-        # Eğer sütunlar boş geliyorsa (0 çıkıyorsa), İTİRAZ SEBEBİ'ne göre manuel hesaplatma yapılabilir
-        # Ancak şimdilik Excel sütun mantığını kullanıyoruz.
-        
-        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-        kpi1.metric("Toplam İtiraz", total_basvuru)
-        kpi2.metric("Kabul Edilen", int(total_kabul), delta=f"%{int(total_kabul/total_basvuru*100) if total_basvuru else 0}")
-        kpi3.metric("Red Edilen", int(total_red), delta_color="inverse")
-        kpi4.metric("Gereksiz Başvuru", int(total_gereksiz))
+        def count_non_empty(df, col_name):
+            if col_name in df.columns:
+                return df[col_name].astype(str).str.strip().replace('', pd.NA).notna().sum()
+            return 0
+            
+        count_gebe = count_non_empty(df_raw, "GEBE İZLEM")
+        count_lohusa = count_non_empty(df_raw, "LOHUSA İZLEM")
+        count_bebek = count_non_empty(df_raw, "BEBEK İZLEM")
+        count_cocuk = count_non_empty(df_raw, "ÇOCUK İZLEM")
+        total_itiraz = len(df_raw)
 
+        # 5'li Metrik Kartı
+        cols = st.columns(5)
+        cols[0].metric("Toplam İtiraz", total_itiraz)
+        cols[1].metric("Gebe İzlem", count_gebe)
+        cols[2].metric("Lohusa İzlem", count_lohusa)
+        cols[3].metric("Bebek İzlem", count_bebek)
+        cols[4].metric("Çocuk İzlem", count_cocuk)
+        
         st.markdown("---")
-
-        # 2. GRAFİKLER İÇİN SÜTUNLAR
-        col_chart1, col_chart2 = st.columns(2)
-
-        # PASTA GRAFİK: KARAR DAĞILIMI
-        df_pie = pd.DataFrame({
-            "Durum": ["Kabul", "Red", "Gereksiz Başvuru"],
-            "Adet": [total_kabul, total_red, total_gereksiz]
-        })
-        fig_pie = px.pie(df_pie, values='Adet', names='Durum', title='Karar Dağılımı', hole=0.4, 
-                         color='Durum', color_discrete_map={'Kabul':'green', 'Red':'red', 'Gereksiz Başvuru':'gray'})
-        col_chart1.plotly_chart(fig_pie, use_container_width=True)
-
-        # BAR GRAFİK: İTİRAZ SEBEPLERİ
-        # İtiraz sebeplerini say
-        if "İTİRAZ SEBEBİ" in df_final.columns:
-            df_reasons = df_final["İTİRAZ SEBEBİ"].value_counts().reset_index()
-            df_reasons.columns = ["Sebep", "Adet"]
-            fig_bar = px.bar(df_reasons.head(10), x="Adet", y="Sebep", orientation='h', title="En Sık Görülen İtiraz Sebepleri", text_auto=True)
-            fig_bar.update_layout(yaxis={'categoryorder':'total ascending'})
-            col_chart2.plotly_chart(fig_bar, use_container_width=True)
-
-        # 3. KONU BAZLI DAĞILIM (AŞI VE İZLEMLER)
-        st.subheader("💉 Aşı ve İzlem Türüne Göre İtirazlar")
         
-        # İlgili sütunları alıp her birinde kaç tane dolu veri var sayıyoruz
-        item_columns = [
-            "GEBE İZLEM", "LOHUSA İZLEM", "BEBEK İZLEM", "ÇOCUK İZLEM",
-            "DaBT-İPA-Hib-Hep-B", "HEP B", "BCG", "KKK", "HEP A",
-            "KPA", "OPA", "SUÇİÇEĞİ", "DaBT-İPA", "TD"
-        ]
+        # --- 2. GRAFİKLER ---
+        col_g1, col_g2 = st.columns(2)
         
-        item_counts = {}
-        for col in item_columns:
-            # Boş olmayan hücreleri say
-            count = df_final[col].astype(str).str.strip().replace('', pd.NA).notna().sum()
-            if count > 0:
-                item_counts[col] = count
+        # A. CİNSİYET DAĞILIMI (PASTA)
+        # Sütun adı genelde "İTİRAZ KONUSU KİŞİNİN CİNSİYETİ" olur
+        cinsiyet_col = next((col for col in df_raw.columns if "CİNSİYET" in col.upper()), None)
         
-        if item_counts:
-            df_items = pd.DataFrame(list(item_counts.items()), columns=["Konu", "Adet"]).sort_values("Adet", ascending=False)
-            fig_items = px.bar(df_items, x="Konu", y="Adet", title="Konu Bazlı İtiraz Yoğunluğu", color="Adet", text_auto=True)
-            st.plotly_chart(fig_items, use_container_width=True)
+        if cinsiyet_col:
+            df_gender = df_raw[cinsiyet_col].value_counts().reset_index()
+            df_gender.columns = ["Cinsiyet", "Adet"]
+            
+            fig_pie = px.pie(df_gender, values='Adet', names='Cinsiyet', 
+                             title='Cinsiyete Göre İtiraz Dağılımı', hole=0.4,
+                             color_discrete_sequence=px.colors.qualitative.Set2)
+            col_g1.plotly_chart(fig_pie, use_container_width=True)
         else:
-            st.info("Aşı ve izlem sütunlarında ayrıştırılabilir veri bulunamadı.")
+            col_g1.warning("Dosyada Cinsiyet bilgisi bulunamadı.")
+
+        # B. İLÇE DAĞILIMI (BAR)
+        ilce_col_raw = next((col for col in df_raw.columns if "İLÇE" in col.upper()), None)
+        
+        if ilce_col_raw:
+            df_ilce = df_raw[ilce_col_raw].value_counts().reset_index()
+            df_ilce.columns = ["İlçe", "İtiraz Sayısı"]
+            # Çoktan aza sırala
+            df_ilce = df_ilce.sort_values("İtiraz Sayısı", ascending=True) # Bar chart için ters sıralama daha iyi durur
+            
+            fig_bar = px.bar(df_ilce, x="İtiraz Sayısı", y="İlçe", 
+                             title="İlçelere Göre İtiraz Yoğunluğu", 
+                             text_auto=True, orientation='h')
+            fig_bar.update_layout(height=600) # İlçe çoksa boyu uzat
+            col_g2.plotly_chart(fig_bar, use_container_width=True)
+        else:
+            col_g2.warning("Dosyada İlçe bilgisi bulunamadı.")
 
 else:
     st.info("👈 Rapor oluşturmak ve grafikleri görmek için lütfen sol menüden Excel dosyanızı yükleyiniz.")
