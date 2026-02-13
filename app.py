@@ -75,7 +75,7 @@ with st.sidebar:
         baskan_gorev = st.text_input("Başkan Unvanı/Görevi", "Başkan")
         
         st.markdown("---")
-        st.subheader("Komisyon Üyeleri")
+        st.subheader("Komisyon Üyeleri (Soldan Sağa)")
         uyeler = []
         for i in range(1, 7):
             col_ad, col_gorev = st.columns(2)
@@ -131,19 +131,19 @@ if uploaded_file:
         workbook = writer.book
         worksheet = writer.sheets['Rapor']
         
-        # Sayfa Ayarları
+        # Sayfa Ayarları (Kompakt)
         worksheet.set_landscape()
         worksheet.set_paper(9) # A4
         worksheet.fit_to_pages(1, 0)
         worksheet.set_margins(left=0.1, right=0.1, top=0.3, bottom=0.3)
         
-        # --- FORMATLAR ---
+        # --- FORMATLAR (MİNİMUM FONT) ---
         fmt_std = workbook.add_format({'text_wrap': True, 'valign': 'vcenter', 'align': 'center', 'border': 1, 'font_size': 5})
         fmt_tc = workbook.add_format({'text_wrap': False, 'valign': 'vcenter', 'align': 'center', 'border': 1, 'font_size': 6, 'num_format': '0'})
         fmt_head = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#DDDDDD', 'border': 1, 'text_wrap': True, 'font_size': 6})
         fmt_title = workbook.add_format({'bold': True, 'align': 'center', 'font_size': 9})
         
-        # İmza Formatları (Hücre Birleştirme için)
+        # İmza Formatları
         fmt_imza_baslik = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'font_size': 7})
         fmt_imza_isim = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'font_size': 7})
         fmt_imza_gorev = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'font_size': 6, 'italic': True})
@@ -155,8 +155,8 @@ if uploaded_file:
         
         # Sütun Genişlikleri
         column_widths = {
-            "SIRA": 3, "ASM ADI": 12, "HEKİM BİRİM NO": 7, "HEKİM ADI SOYADI": 12, "HEKİM-ASÇ TC KİMLİK NO": 10,
-            "İTİRAZ SEBEBİ": 15, "İTİRAZ KONUSU KİŞİNİN ADI SOYADI": 12, "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO": 10,
+            "SIRA": 3, "ASM ADI": 12, "HEKİM BİRİM NO": 7, "HEKİM ADI SOYADI": 12, "HEKİM-ASÇ TC KİMLİK NO": 11,
+            "İTİRAZ SEBEBİ": 15, "İTİRAZ KONUSU KİŞİNİN ADI SOYADI": 12, "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO": 11,
             "KARAR AÇIKLAMASI": 18, "GEREKSİZ BAŞVURU": 4, "KABUL": 4, "RED": 4, "DEFAULT": 3.5
         }
 
@@ -165,57 +165,52 @@ if uploaded_file:
             width = column_widths.get(col_name, column_widths["DEFAULT"])
             worksheet.set_column(i, i, width)
 
-        # Veri Yazdırma
         for row_idx, row in df_final.iterrows():
             for col_idx, val in enumerate(row):
                 current_fmt = fmt_tc if "TC" in df_final.columns[col_idx] else fmt_std
                 worksheet.write(row_idx+5, col_idx, val, current_fmt)
         
-        # --- DÜZENLİ İMZA BLOĞU (HÜCRE BİRLEŞTİRME YÖNTEMİ) ---
+        # --- SİMETRİK VE EŞİT İMZA BLOĞU ---
         start_row = len(df_final) + 8
-        total_cols = 26 # 26 Sütun var (0-25)
+        
+        # BU KISIM DÜZELTİLDİ:
+        # 26 Sütunumuz var (0'dan 25'e). 
+        # 6 üyeyi elle belirlediğimiz aralıklara (Merge Range) oturtuyoruz.
+        # Bu aralıklar tüm sayfa genişliğini kapsar.
+        
+        # (Başlangıç Sütunu, Bitiş Sütunu) Tuples
+        # 0-3, 4-7, 8-11, 12-16, 17-20, 21-25
+        signature_ranges = [
+            (0, 3),   # 1. Üye (4 birim)
+            (4, 7),   # 2. Üye (4 birim)
+            (8, 11),  # 3. Üye (4 birim)
+            (12, 16), # 4. Üye (5 birim - orta)
+            (17, 20), # 5. Üye (4 birim)
+            (21, 25)  # 6. Üye (5 birim - son)
+        ]
         
         if uyeler:
-            num_members = len(uyeler)
-            # Her üye için kaç sütunluk yer ayıralım?
-            # 26 sütun / 6 üye = yaklaşık 4.3 sütun. Her üyeye 4 sütun verelim.
-            span = total_cols // num_members 
-            if span < 3: span = 3 # En az 3 sütunluk yer olsun
-            
             for i, member_data in enumerate(uyeler):
-                # Başlangıç ve Bitiş Sütunlarını Hesapla
-                c_start = i * span
-                c_end = c_start + span - 1
-                
-                # Eğer son üye ise, kalan tüm sütunları ona verelim (sağa yaslansın)
-                if i == num_members - 1:
-                    c_end = total_cols - 1
-                
-                # Hücreleri Birleştirerek Yaz (Merge Range)
-                # Üst: Komisyon Üyesi
-                worksheet.merge_range(start_row, c_start, start_row, c_end, "KOMİSYON ÜYESİ", fmt_imza_baslik)
-                # Orta: İsim
-                worksheet.merge_range(start_row + 1, c_start, start_row + 1, c_end, member_data["ad"], fmt_imza_isim)
-                # Alt: Görev
-                worksheet.merge_range(start_row + 2, c_start, start_row + 2, c_end, member_data["gorev"], fmt_imza_gorev)
-                # Alt: İmza
-                worksheet.merge_range(start_row + 3, c_start, start_row + 3, c_end, "(İmza)", fmt_imza_gorev)
+                if i < len(signature_ranges):
+                    c_start, c_end = signature_ranges[i]
+                    
+                    worksheet.merge_range(start_row, c_start, start_row, c_end, "KOMİSYON ÜYESİ", fmt_imza_baslik)
+                    worksheet.merge_range(start_row+1, c_start, start_row+1, c_end, member_data["ad"], fmt_imza_isim)
+                    worksheet.merge_range(start_row+2, c_start, start_row+2, c_end, member_data["gorev"], fmt_imza_gorev)
+                    worksheet.merge_range(start_row+3, c_start, start_row+3, c_end, "(İmza)", fmt_imza_gorev)
 
-        # 2. KOMİSYON BAŞKANI (Alt Satır, Tam Ortaya 6 Sütunluk Merge)
+        # KOMİSYON BAŞKANI (Alt Satır, Orta - Geniş Blok)
         president_row = start_row + 5
-        
-        # Tam ortayı bul: 26/2 = 13. 
-        # Başkan için 6 sütun ayıralım (10 ile 16 arası)
-        p_start = 10
-        p_end = 16
+        # 10. sütundan 15. sütuna kadar birleştir (Tam Orta)
+        p_start, p_end = 10, 15
         
         worksheet.merge_range(president_row, p_start, president_row, p_end, "KOMİSYON BAŞKANI", fmt_imza_baslik)
-        worksheet.merge_range(president_row + 1, p_start, president_row + 1, p_end, baskan_ad, fmt_imza_isim)
-        worksheet.merge_range(president_row + 2, p_start, president_row + 2, p_end, baskan_gorev, fmt_imza_gorev)
-        worksheet.merge_range(president_row + 3, p_start, president_row + 3, p_end, "(İmza)", fmt_imza_gorev)
+        worksheet.merge_range(president_row+1, p_start, president_row+1, p_end, baskan_ad, fmt_imza_isim)
+        worksheet.merge_range(president_row+2, p_start, president_row+2, p_end, baskan_gorev, fmt_imza_gorev)
+        worksheet.merge_range(president_row+3, p_start, president_row+3, p_end, "(İmza)", fmt_imza_gorev)
 
     st.download_button(
-        label="📗 Excel Raporunu İndir (Simetrik İmzalı)",
+        label="📗 Excel Raporunu İndir (İmzalı)",
         data=excel_buffer.getvalue(),
         file_name=f"Rapor_{ilce_adi if ilce_adi != 'TÜMÜ' else 'Genel'}.xlsx",
         mime="application/vnd.ms-excel",
