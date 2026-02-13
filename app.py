@@ -1,10 +1,9 @@
 import streamlit as st
 import pandas as pd
-import io
 import plotly.express as px
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="Performans İtiraz Sistemi", layout="wide", page_icon="⚖️")
+st.set_page_config(page_title="Performans İtiraz Yönetim Paneli", layout="wide", page_icon="📊")
 
 # --- SABİT LİSTELER ---
 ISTANBUL_ILCELERI = ["TÜMÜ"] + [
@@ -23,25 +22,8 @@ AY_NO_MAP = {
     "TEMMUZ": "07", "AĞUSTOS": "08", "EYLÜL": "09", "EKİM": "10", "KASIM": "11", "ARALIK": "12"
 }
 
-# --- SÜTUN EŞLEŞTİRME ---
-COLUMN_MAPPING = {
-    "SIRA": "OTOMATIK", 
-    "ASM ADI": "ASM ADI",
-    "HEKİM BİRİM NO": "HEKİM BİRİM NO",
-    "HEKİM ADI SOYADI": "HEKİM ADI SOYADI",
-    "HEKİM-ASÇ TC KİMLİK NO": "HEKİM-ASÇ TC KİMLİK NO",
-    "İTİRAZ SEBEBİ": "İTİRAZ SEBEBİ",
-    "İTİRAZ KONUSU KİŞİNİN ADI SOYADI": "İTİRAZ KONUSU KİŞİNİN ADI SOYADI",
-    "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO": "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO",
-    "GEBE İZLEM": "GEBE İZLEM", "LOHUSA İZLEM": "LOHUSA İZLEM", "BEBEK İZLEM": "BEBEK İZLEM", "ÇOCUK İZLEM": "ÇOCUK İZLEM",
-    "DaBT-İPA-Hib-Hep-B": "DaBT-İPA-Hib-Hep-B", "HEP B": "HEP B", "BCG": "BCG", "KKK": "KKK", "HEP A": "HEP A",
-    "KPA": "KPA", "OPA": "OPA", "SUÇİÇEĞİ": "SU ÇİÇEĞİ", "DaBT-İPA": "DaBT-İPA", "TD": "TD",
-    "KABUL": "KABUL", "RED": "RED", "GEREKSİZ BAŞVURU": "GEREKSİZ BAŞVURU", "KARAR AÇIKLAMASI": "KARAR AÇIKLAMASI"
-}
-ISTENEN_SUTUNLAR = list(COLUMN_MAPPING.keys())
-
 # --- ANA UYGULAMA ---
-st.title("⚖️ Performans İtiraz Yönetim Paneli")
+st.title("📊 Performans İtiraz Yönetim Paneli")
 
 # --- SOL MENÜ ---
 with st.sidebar:
@@ -57,31 +39,16 @@ with st.sidebar:
     secilen_yil = col_yil.selectbox("Yıl", YILLAR, index=1)
     
     if ilce_adi == "TÜMÜ":
-        baslik_ilce = "İSTANBUL İL SAĞLIK MÜDÜRLÜĞÜ (GENEL)"
+        baslik_ilce = "İSTANBUL (GENEL)"
     else:
-        baslik_ilce = f"{ilce_adi} İLÇE SAĞLIK MÜDÜRLÜĞÜ"
+        baslik_ilce = f"{ilce_adi} İLÇESİ"
 
     if secilen_ay == "TÜMÜ":
-        baslik_donem = f"DÖNEM: {secilen_yil} (TÜM AYLAR)"
+        baslik_donem = f"{secilen_yil} (TÜM AYLAR)"
     else:
-        baslik_donem = f"DÖNEM: {secilen_ay} / {secilen_yil}"
+        baslik_donem = f"{secilen_ay} / {secilen_yil}"
         
-    st.markdown("---")
-
-    with st.expander("📝 KOMİSYON BİLGİLERİ", expanded=False):
-        st.subheader("Komisyon Başkanı")
-        baskan_ad = st.text_input("Başkan Adı Soyadı", "Dr. ...")
-        baskan_gorev = st.text_input("Başkan Unvanı/Görevi", "Başkan")
-        
-        st.markdown("---")
-        st.subheader("Komisyon Üyeleri")
-        uyeler = []
-        for i in range(1, 7):
-            col_ad, col_gorev = st.columns(2)
-            ad = col_ad.text_input(f"{i}. Üye Adı", key=f"ad_{i}")
-            gorev = col_gorev.text_input(f"{i}. Üye Görevi", key=f"gorev_{i}")
-            if ad:
-                uyeler.append({"ad": ad, "gorev": gorev})
+    st.success(f"Seçili: {baslik_ilce} - {baslik_donem}")
 
 # --- İŞLEM ---
 if uploaded_file:
@@ -94,10 +61,12 @@ if uploaded_file:
     # --- FİLTRELEME ---
     df_filtered = df_raw.copy()
     
-    if ilce_adi != "TÜMÜ":
-        ilce_col = next((col for col in df_filtered.columns if "İLÇE" in col.upper()), None)
-        if ilce_col: df_filtered = df_filtered[df_filtered[ilce_col] == ilce_adi]
+    # 1. İlçe Filtresi
+    ilce_col = next((col for col in df_filtered.columns if "İLÇE" in col.upper()), None)
+    if ilce_adi != "TÜMÜ" and ilce_col:
+        df_filtered = df_filtered[df_filtered[ilce_col] == ilce_adi]
 
+    # 2. Dönem Filtresi
     if secilen_ay != "TÜMÜ":
         hedef_donem = f"{secilen_yil}-{AY_NO_MAP[secilen_ay]}"
         donem_col = next((col for col in df_filtered.columns if "DÖNEM" in col.upper() or "PERFORMANS" in col.upper()), None)
@@ -107,208 +76,141 @@ if uploaded_file:
         st.error("⚠️ Seçilen filtrelere uygun kayıt bulunamadı.")
         st.stop()
 
-    # --- VERİ HAZIRLAMA (STANDART İSİMLENDİRME) ---
-    df_final = pd.DataFrame()
-    for target_col, source_col in COLUMN_MAPPING.items():
-        if target_col == "SIRA": continue
-        found_col = None
-        for col in df_filtered.columns:
-            if source_col.lower() == col.lower(): found_col = col; break
-            if source_col.replace(" ","").lower() == col.replace(" ","").lower(): found_col = col; break
-        if found_col: df_final[target_col] = df_filtered[found_col]
-        else: df_final[target_col] = ""
+    # --- YARDIMCI FONKSİYONLAR ---
+    def safe_count(df, col_name):
+        """Hücre dolu mu boş mu sayar"""
+        if col_name not in df.columns: return 0
+        s = df[col_name].astype(str).replace(['nan', 'NaN', 'None', 'NAT', '<NA>'], '').str.strip()
+        return (s != '').sum()
 
-    df_final["SIRA"] = range(1, len(df_final) + 1)
-    df_final = df_final[ISTENEN_SUTUNLAR]
-    
-    # Excel İçin Temizlenmiş Veri
-    df_excel = df_final.fillna("")
-    
-    st.success(f"✅ {len(df_final)} Kayıt İşlendi.")
-    
+    def count_contains(df, col_keywords, search_term):
+        """Belirli bir sütunda (veya sütunlarda) kelime arar"""
+        col_name = next((col for col in df.columns if any(k in col.upper() for k in col_keywords)), None)
+        if not col_name: return 0
+        
+        # Türkçe karakter duyarlılığı için basit normalizasyon
+        s = df[col_name].astype(str).str.upper().str.replace('İ', 'I').str.replace('Ğ', 'G').str.replace('Ü', 'U').str.replace('Ş', 'S').str.replace('Ö', 'O').str.replace('Ç', 'C')
+        search_term = search_term.upper().replace('İ', 'I').replace('Ğ', 'G').replace('Ü', 'U').replace('Ş', 'S').replace('Ö', 'O').replace('Ç', 'C')
+        
+        return s.str.contains(search_term, na=False).sum()
+
     # =========================================================================
-    # TAB YAPISI
+    # ANALİZ PANELİ
     # =========================================================================
-    tab1, tab2 = st.tabs(["📄 Resmi Rapor İndir", "📊 Grafik ve İstatistikler"])
+    
+    st.subheader(f"📊 {baslik_ilce} - {baslik_donem} Özeti")
+    
+    # --- 1. TEMEL KPI'LAR (EN ÜST) ---
+    count_gebe = safe_count(df_filtered, "GEBE İZLEM")
+    count_lohusa = safe_count(df_filtered, "LOHUSA İZLEM")
+    count_bebek = safe_count(df_filtered, "BEBEK İZLEM")
+    count_cocuk = safe_count(df_filtered, "ÇOCUK İZLEM")
+    total_itiraz = len(df_filtered)
 
-    # -------------------------------------------------------------------------
-    # SEKME 1: EXCEL OLUŞTURMA
-    # -------------------------------------------------------------------------
-    with tab1:
-        st.info(f"📍 {baslik_ilce} - 📅 {baslik_donem}")
+    cols = st.columns(5)
+    cols[0].metric("Toplam İtiraz", total_itiraz, border=True)
+    cols[1].metric("Gebe İzlem", count_gebe, border=True)
+    cols[2].metric("Lohusa İzlem", count_lohusa, border=True)
+    cols[3].metric("Bebek İzlem", count_bebek, border=True)
+    cols[4].metric("Çocuk İzlem", count_cocuk, border=True)
+    
+    st.markdown("---")
+
+    # --- 2. ASM ONAM VE İLÇE TEYİT ANALİZİ ---
+    col_asm, col_ilce = st.columns(2)
+
+    with col_asm:
+        st.info("📝 **ASM Onam Durumu**")
         
-        excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-            df_excel.to_excel(writer, sheet_name='Rapor', startrow=4, index=False)
-            workbook = writer.book
-            worksheet = writer.sheets['Rapor']
-            
-            # Ayarlar (Kompakt)
-            worksheet.set_landscape()
-            worksheet.set_paper(9) # A4
-            worksheet.fit_to_pages(1, 0)
-            worksheet.set_margins(left=0.1, right=0.1, top=0.3, bottom=0.3)
-            
-            # Formatlar
-            fmt_std = workbook.add_format({'text_wrap': True, 'valign': 'vcenter', 'align': 'center', 'border': 1, 'font_size': 5})
-            fmt_tc = workbook.add_format({'text_wrap': False, 'valign': 'vcenter', 'align': 'center', 'border': 1, 'font_size': 6, 'num_format': '0'})
-            fmt_head = workbook.add_format({'bold': True, 'align': 'center', 'bg_color': '#DDDDDD', 'border': 1, 'text_wrap': True, 'font_size': 6})
-            fmt_title = workbook.add_format({'bold': True, 'align': 'center', 'font_size': 9})
-            fmt_imza_baslik = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'font_size': 7})
-            fmt_imza_isim = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'font_size': 7})
-            fmt_imza_gorev = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'font_size': 6, 'italic': True})
-
-            # Başlıklar
-            worksheet.merge_range('A1:Z1', "AİLE HEKİMLİĞİ PERFORMANS İTİRAZ DEĞERLENDİRME TABLOSU", fmt_title)
-            worksheet.merge_range('A2:Z2', baslik_ilce, fmt_title)
-            worksheet.merge_range('A3:Z3', baslik_donem, fmt_title)
-            
-            # Sütun Genişlikleri
-            column_widths = {
-                "SIRA": 3, "ASM ADI": 12, "HEKİM BİRİM NO": 7, "HEKİM ADI SOYADI": 12, "HEKİM-ASÇ TC KİMLİK NO": 11,
-                "İTİRAZ SEBEBİ": 15, "İTİRAZ KONUSU KİŞİNİN ADI SOYADI": 12, "İTİRAZ KONUSU KİŞİNİN TC KİMLİK NO": 11,
-                "KARAR AÇIKLAMASI": 18, "GEREKSİZ BAŞVURU": 4, "KABUL": 4, "RED": 4, "DEFAULT": 3.5
-            }
-
-            for i, col_name in enumerate(df_excel.columns):
-                worksheet.write(4, i, col_name, fmt_head)
-                width = column_widths.get(col_name, column_widths["DEFAULT"])
-                worksheet.set_column(i, i, width)
-
-            # Veri
-            for row_idx, row in df_excel.iterrows():
-                for col_idx, val in enumerate(row):
-                    current_fmt = fmt_tc if "TC" in df_excel.columns[col_idx] else fmt_std
-                    worksheet.write(row_idx+5, col_idx, val, current_fmt)
-            
-            # İmza Bloğu (Sabit Bloklama)
-            start_row = len(df_excel) + 8
-            signature_ranges = [(0, 3), (4, 7), (8, 11), (12, 16), (17, 20), (21, 25)]
-            
-            if uyeler:
-                for i, member_data in enumerate(uyeler):
-                    if i < len(signature_ranges):
-                        c_start, c_end = signature_ranges[i]
-                        worksheet.merge_range(start_row, c_start, start_row, c_end, "KOMİSYON ÜYESİ", fmt_imza_baslik)
-                        worksheet.merge_range(start_row+1, c_start, start_row+1, c_end, member_data["ad"], fmt_imza_isim)
-                        worksheet.merge_range(start_row+2, c_start, start_row+2, c_end, member_data["gorev"], fmt_imza_gorev)
-                        worksheet.merge_range(start_row+3, c_start, start_row+3, c_end, "(İmza)", fmt_imza_gorev)
-
-            # Başkan
-            president_row = start_row + 5
-            p_start, p_end = 10, 15
-            worksheet.merge_range(president_row, p_start, president_row, p_end, "KOMİSYON BAŞKANI", fmt_imza_baslik)
-            worksheet.merge_range(president_row+1, p_start, president_row+1, p_end, baskan_ad, fmt_imza_isim)
-            worksheet.merge_range(president_row+2, p_start, president_row+2, p_end, baskan_gorev, fmt_imza_gorev)
-            worksheet.merge_range(president_row+3, p_start, president_row+3, p_end, "(İmza)", fmt_imza_gorev)
-
-        st.download_button(
-            label="📗 Excel Raporunu İndir (İmzalı)",
-            data=excel_buffer.getvalue(),
-            file_name=f"Rapor_{ilce_adi if ilce_adi != 'TÜMÜ' else 'Genel'}.xlsx",
-            mime="application/vnd.ms-excel",
-            use_container_width=True
-        )
-
-    # -------------------------------------------------------------------------
-    # SEKME 2: GRAFİK VE ANALİZ (AŞILAR EKLENDİ)
-    # -------------------------------------------------------------------------
-    with tab2:
-        st.subheader("📊 İtiraz ve İzlem Analiz Paneli")
+        # ASM ONAM Sütununu Bul
+        asm_onam_keywords = ["ASM ONAM", "ONAM"]
         
-        # --- FONKSİYON: Dolu Hücre Sayma ---
-        def safe_count(df, col_name):
-            if col_name not in df.columns: return 0
-            # 'nan', 'NaN' ve boşluk olmayanları say
-            s = df[col_name].astype(str).replace(['nan', 'NaN', 'None', 'NAT', '<NA>'], '').str.strip()
-            return (s != '').sum()
-
-        # 1. TEMEL KPI'LAR
-        count_gebe = safe_count(df_final, "GEBE İZLEM")
-        count_lohusa = safe_count(df_final, "LOHUSA İZLEM")
-        count_bebek = safe_count(df_final, "BEBEK İZLEM")
-        count_cocuk = safe_count(df_final, "ÇOCUK İZLEM")
-        total_itiraz = len(df_final)
-
-        cols = st.columns(5)
-        cols[0].metric("Toplam İtiraz", total_itiraz)
-        cols[1].metric("Gebe İzlem", count_gebe)
-        cols[2].metric("Lohusa İzlem", count_lohusa)
-        cols[3].metric("Bebek İzlem", count_bebek)
-        cols[4].metric("Çocuk İzlem", count_cocuk)
+        # Sayımları Yap
+        count_imzali = count_contains(df_filtered, asm_onam_keywords, "IMZALI RED")
+        count_imtina = count_contains(df_filtered, asm_onam_keywords, "IMTINA")
         
-        st.markdown("---")
-
-        # 2. AŞI İTİRAZLARI (ÖZEL BÖLÜM)
-        st.subheader("💉 Aşı Türüne Göre İtiraz Dağılımı")
+        # Oranlar
+        ratio_imzali = (count_imzali / total_itiraz * 100) if total_itiraz > 0 else 0
+        ratio_imtina = (count_imtina / total_itiraz * 100) if total_itiraz > 0 else 0
         
-        asi_listesi = [
-            "DaBT-İPA-Hib-Hep-B", "HEP B", "BCG", "KKK", "HEP A", 
-            "KPA", "OPA", "SUÇİÇEĞİ", "DaBT-İPA", "TD"
-        ]
+        # Metrik Gösterimi
+        c1, c2 = st.columns(2)
+        c1.metric("İmzalı Red", count_imzali, f"%{ratio_imzali:.1f}")
+        c2.metric("İmzadan İmtina", count_imtina, f"%{ratio_imtina:.1f}")
+        
+        # Görsel
+        df_onam = pd.DataFrame({
+            "Durum": ["İmzalı Red", "İmzadan İmtina", "Diğer"],
+            "Adet": [count_imzali, count_imtina, total_itiraz - (count_imzali + count_imtina)]
+        })
+        fig_onam = px.pie(df_onam, values='Adet', names='Durum', hole=0.4, 
+                          color_discrete_map={'İmzalı Red':'#FF6B6B', 'İmzadan İmtina':'#FFA502', 'Diğer':'#f1f2f6'})
+        fig_onam.update_layout(height=250, margin=dict(t=0, b=0, l=0, r=0))
+        st.plotly_chart(fig_onam, use_container_width=True)
+
+    with col_ilce:
+        st.info("🔍 **İlçe Sağlık Teyit Yöntemi**")
+        
+        # İLÇE TEYİT Sütununu Bul
+        teyit_keywords = ["İLÇE SAĞLIK TEYİT", "İLÇE TEYİT", "TEYİT SONUCU"]
+        
+        # Sayımları Yap
+        count_telefon = count_contains(df_filtered, teyit_keywords, "TELEFON")
+        count_ev = count_contains(df_filtered, teyit_keywords, "EV") # Ev ziyareti, evde, vb.
+        
+        # Oranlar
+        ratio_telefon = (count_telefon / total_itiraz * 100) if total_itiraz > 0 else 0
+        ratio_ev = (count_ev / total_itiraz * 100) if total_itiraz > 0 else 0
+        
+        # Metrik Gösterimi
+        c3, c4 = st.columns(2)
+        c3.metric("Telefonla Teyit", count_telefon, f"%{ratio_telefon:.1f}")
+        c4.metric("Ev Ziyareti", count_ev, f"%{ratio_ev:.1f}")
+        
+        # Görsel
+        df_teyit = pd.DataFrame({
+            "Yöntem": ["Telefon", "Ev Ziyareti", "Diğer/Belirsiz"],
+            "Adet": [count_telefon, count_ev, total_itiraz - (count_telefon + count_ev)]
+        })
+        fig_teyit = px.bar(df_teyit, x="Yöntem", y="Adet", text_auto=True, color="Yöntem",
+                           color_discrete_map={'Telefon':'#1dd1a1', 'Ev Ziyareti':'#54a0ff', 'Diğer/Belirsiz':'#c8d6e5'})
+        fig_teyit.update_layout(height=250, margin=dict(t=10, b=0, l=0, r=0), showlegend=False)
+        st.plotly_chart(fig_teyit, use_container_width=True)
+
+    st.markdown("---")
+
+    # --- 3. AŞI VE DETAY GRAFİKLERİ ---
+    col_a1, col_a2 = st.columns([2, 1])
+
+    with col_a1:
+        st.subheader("💉 Aşı Türüne Göre İtirazlar")
+        asi_listesi = ["DaBT-İPA-Hib-Hep-B", "HEP B", "BCG", "KKK", "HEP A", "KPA", "OPA", "SUÇİÇEĞİ", "DaBT-İPA", "TD"]
         
         asi_verileri = []
         for asi in asi_listesi:
-            count = safe_count(df_final, asi)
+            count = safe_count(df_filtered, asi)
             if count > 0:
                 asi_verileri.append({"Aşı Adı": asi, "İtiraz Sayısı": count})
         
         if asi_verileri:
             df_asi = pd.DataFrame(asi_verileri).sort_values("İtiraz Sayısı", ascending=True)
-            
-            col_a1, col_a2 = st.columns([2, 1])
-            
-            with col_a1:
-                # Aşı Grafiği
-                fig_asi = px.bar(df_asi, x="İtiraz Sayısı", y="Aşı Adı", 
-                                 title="Aşı İtirazları (Dolu Hücre Bazlı)", 
-                                 text_auto=True, orientation='h', color="İtiraz Sayısı")
-                st.plotly_chart(fig_asi, use_container_width=True)
-            
-            with col_a2:
-                # Aşı Tablosu
-                st.write("📋 **Sayısal Detay**")
-                st.dataframe(df_asi.sort_values("İtiraz Sayısı", ascending=False), hide_index=True, use_container_width=True)
-                total_asi_itirazi = df_asi["İtiraz Sayısı"].sum()
-                st.info(f"Toplam İşaretli Aşı İtirazı: **{total_asi_itirazi}**")
+            fig_asi = px.bar(df_asi, x="İtiraz Sayısı", y="Aşı Adı", text_auto=True, orientation='h', color="İtiraz Sayısı")
+            st.plotly_chart(fig_asi, use_container_width=True)
         else:
-            st.info("Bu filtrede herhangi bir aşı itirazı bulunamadı.")
+            st.warning("Veri setinde aşı itirazı bulunamadı.")
 
-        st.markdown("---")
-        
-        # 3. DİĞER GRAFİKLER
-        col_g1, col_g2 = st.columns(2)
-        
-        # Cinsiyet
-        cinsiyet_col = next((col for col in df_final.columns if "CİNSİYET" in col.upper()), None) # df_final'de olmayabilir, raw'a bak
-        if not cinsiyet_col: 
-             cinsiyet_col = next((col for col in df_filtered.columns if "CİNSİYET" in col.upper()), None)
-             target_df = df_filtered
+    with col_a2:
+        st.subheader("🏙️ İlçe Dağılımı")
+        if ilce_col:
+            df_ilce = df_filtered[ilce_col].value_counts().reset_index()
+            df_ilce.columns = ["İlçe", "Adet"]
+            df_ilce = df_ilce.sort_values("Adet", ascending=True).tail(10) # En çok olan 10 ilçe
+            
+            fig_bar_ilce = px.bar(df_ilce, x="Adet", y="İlçe", text_auto=True, orientation='h')
+            fig_bar_ilce.update_layout(height=400)
+            st.plotly_chart(fig_bar_ilce, use_container_width=True)
         else:
-             target_df = df_final
-
-        if cinsiyet_col:
-            df_gender = target_df[cinsiyet_col].astype(str).replace(['nan', 'NaN'], '').str.strip()
-            df_gender = df_gender[df_gender != '']
-            df_gender_counts = df_gender.value_counts().reset_index()
-            df_gender_counts.columns = ["Cinsiyet", "Adet"]
-            
-            if not df_gender_counts.empty:
-                fig_pie = px.pie(df_gender_counts, values='Adet', names='Cinsiyet', 
-                                 title='Cinsiyet Dağılımı', hole=0.4)
-                col_g1.plotly_chart(fig_pie, use_container_width=True)
-
-        # İlçe
-        ilce_col_raw = next((col for col in df_filtered.columns if "İLÇE" in col.upper()), None)
-        if ilce_col_raw:
-            df_ilce = df_filtered[ilce_col_raw].value_counts().reset_index()
-            df_ilce.columns = ["İlçe", "İtiraz Sayısı"]
-            df_ilce = df_ilce.sort_values("İtiraz Sayısı", ascending=True)
-            
-            fig_bar = px.bar(df_ilce, x="İtiraz Sayısı", y="İlçe", 
-                             title="İlçe Dağılımı", text_auto=True, orientation='h')
-            fig_bar.update_layout(height=500)
-            col_g2.plotly_chart(fig_bar, use_container_width=True)
+            st.warning("İlçe sütunu bulunamadı.")
 
 else:
-    st.info("👈 Rapor oluşturmak ve grafikleri görmek için lütfen sol menüden Excel dosyanızı yükleyiniz.")
+    st.info("👈 Analiz paneline erişmek için lütfen sol menüden Excel dosyanızı yükleyiniz.")
