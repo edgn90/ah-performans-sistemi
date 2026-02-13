@@ -92,36 +92,36 @@ if uploaded_file:
         st.stop()
     
     # --- FİLTRELEME ---
-    # 1. İlçe Filtresi
+    df_filtered = df_raw.copy()
+    
     if ilce_adi != "TÜMÜ":
-        ilce_col = next((col for col in df_raw.columns if "İLÇE" in col.upper()), None)
-        if ilce_col: df_raw = df_raw[df_raw[ilce_col] == ilce_adi]
+        ilce_col = next((col for col in df_filtered.columns if "İLÇE" in col.upper()), None)
+        if ilce_col: df_filtered = df_filtered[df_filtered[ilce_col] == ilce_adi]
 
-    # 2. Dönem Filtresi
     if secilen_ay != "TÜMÜ":
         hedef_donem = f"{secilen_yil}-{AY_NO_MAP[secilen_ay]}"
-        donem_col = next((col for col in df_raw.columns if "DÖNEM" in col.upper() or "PERFORMANS" in col.upper()), None)
-        if donem_col: df_raw = df_raw[df_raw[donem_col].astype(str).str.contains(hedef_donem, na=False)]
+        donem_col = next((col for col in df_filtered.columns if "DÖNEM" in col.upper() or "PERFORMANS" in col.upper()), None)
+        if donem_col: df_filtered = df_filtered[df_filtered[donem_col].astype(str).str.contains(hedef_donem, na=False)]
 
-    if len(df_raw) == 0:
+    if len(df_filtered) == 0:
         st.error("⚠️ Seçilen filtrelere uygun kayıt bulunamadı.")
         st.stop()
 
-    # --- VERİ HAZIRLAMA (EXCEL İÇİN) ---
+    # --- VERİ HAZIRLAMA (STANDART İSİMLENDİRME) ---
     df_final = pd.DataFrame()
     for target_col, source_col in COLUMN_MAPPING.items():
         if target_col == "SIRA": continue
         found_col = None
-        for col in df_raw.columns:
+        for col in df_filtered.columns:
             if source_col.lower() == col.lower(): found_col = col; break
             if source_col.replace(" ","").lower() == col.replace(" ","").lower(): found_col = col; break
-        if found_col: df_final[target_col] = df_raw[found_col]
+        if found_col: df_final[target_col] = df_filtered[found_col]
         else: df_final[target_col] = ""
 
     df_final["SIRA"] = range(1, len(df_final) + 1)
     df_final = df_final[ISTENEN_SUTUNLAR]
     
-    # Sayısal olmayan değerleri temizle (Excel çıktısı için)
+    # Excel İçin Temizlenmiş Veri
     df_excel = df_final.fillna("")
     
     st.success(f"✅ {len(df_final)} Kayıt İşlendi.")
@@ -211,27 +211,25 @@ if uploaded_file:
         )
 
     # -------------------------------------------------------------------------
-    # SEKME 2: GRAFİK VE ANALİZ
+    # SEKME 2: GRAFİK VE ANALİZ (AŞILAR EKLENDİ)
     # -------------------------------------------------------------------------
     with tab2:
         st.subheader("📊 İtiraz ve İzlem Analiz Paneli")
         
-        # --- 1. İZLEM TÜRLERİ SAYILARI (KPI) ---
-        # Sütunlarda dolu olan hücreleri sayıyoruz
-        # (Sadece boş olmayan ve NaN olmayanlar itiraz sayılır)
-        
-        def count_non_empty(df, col_name):
-            if col_name in df.columns:
-                return df[col_name].astype(str).str.strip().replace('', pd.NA).notna().sum()
-            return 0
-            
-        count_gebe = count_non_empty(df_raw, "GEBE İZLEM")
-        count_lohusa = count_non_empty(df_raw, "LOHUSA İZLEM")
-        count_bebek = count_non_empty(df_raw, "BEBEK İZLEM")
-        count_cocuk = count_non_empty(df_raw, "ÇOCUK İZLEM")
-        total_itiraz = len(df_raw)
+        # --- FONKSİYON: Dolu Hücre Sayma ---
+        def safe_count(df, col_name):
+            if col_name not in df.columns: return 0
+            # 'nan', 'NaN' ve boşluk olmayanları say
+            s = df[col_name].astype(str).replace(['nan', 'NaN', 'None', 'NAT', '<NA>'], '').str.strip()
+            return (s != '').sum()
 
-        # 5'li Metrik Kartı
+        # 1. TEMEL KPI'LAR
+        count_gebe = safe_count(df_final, "GEBE İZLEM")
+        count_lohusa = safe_count(df_final, "LOHUSA İZLEM")
+        count_bebek = safe_count(df_final, "BEBEK İZLEM")
+        count_cocuk = safe_count(df_final, "ÇOCUK İZLEM")
+        total_itiraz = len(df_final)
+
         cols = st.columns(5)
         cols[0].metric("Toplam İtiraz", total_itiraz)
         cols[1].metric("Gebe İzlem", count_gebe)
@@ -240,41 +238,77 @@ if uploaded_file:
         cols[4].metric("Çocuk İzlem", count_cocuk)
         
         st.markdown("---")
+
+        # 2. AŞI İTİRAZLARI (ÖZEL BÖLÜM)
+        st.subheader("💉 Aşı Türüne Göre İtiraz Dağılımı")
         
-        # --- 2. GRAFİKLER ---
+        asi_listesi = [
+            "DaBT-İPA-Hib-Hep-B", "HEP B", "BCG", "KKK", "HEP A", 
+            "KPA", "OPA", "SUÇİÇEĞİ", "DaBT-İPA", "TD"
+        ]
+        
+        asi_verileri = []
+        for asi in asi_listesi:
+            count = safe_count(df_final, asi)
+            if count > 0:
+                asi_verileri.append({"Aşı Adı": asi, "İtiraz Sayısı": count})
+        
+        if asi_verileri:
+            df_asi = pd.DataFrame(asi_verileri).sort_values("İtiraz Sayısı", ascending=True)
+            
+            col_a1, col_a2 = st.columns([2, 1])
+            
+            with col_a1:
+                # Aşı Grafiği
+                fig_asi = px.bar(df_asi, x="İtiraz Sayısı", y="Aşı Adı", 
+                                 title="Aşı İtirazları (Dolu Hücre Bazlı)", 
+                                 text_auto=True, orientation='h', color="İtiraz Sayısı")
+                st.plotly_chart(fig_asi, use_container_width=True)
+            
+            with col_a2:
+                # Aşı Tablosu
+                st.write("📋 **Sayısal Detay**")
+                st.dataframe(df_asi.sort_values("İtiraz Sayısı", ascending=False), hide_index=True, use_container_width=True)
+                total_asi_itirazi = df_asi["İtiraz Sayısı"].sum()
+                st.info(f"Toplam İşaretli Aşı İtirazı: **{total_asi_itirazi}**")
+        else:
+            st.info("Bu filtrede herhangi bir aşı itirazı bulunamadı.")
+
+        st.markdown("---")
+        
+        # 3. DİĞER GRAFİKLER
         col_g1, col_g2 = st.columns(2)
         
-        # A. CİNSİYET DAĞILIMI (PASTA)
-        # Sütun adı genelde "İTİRAZ KONUSU KİŞİNİN CİNSİYETİ" olur
-        cinsiyet_col = next((col for col in df_raw.columns if "CİNSİYET" in col.upper()), None)
-        
-        if cinsiyet_col:
-            df_gender = df_raw[cinsiyet_col].value_counts().reset_index()
-            df_gender.columns = ["Cinsiyet", "Adet"]
-            
-            fig_pie = px.pie(df_gender, values='Adet', names='Cinsiyet', 
-                             title='Cinsiyete Göre İtiraz Dağılımı', hole=0.4,
-                             color_discrete_sequence=px.colors.qualitative.Set2)
-            col_g1.plotly_chart(fig_pie, use_container_width=True)
+        # Cinsiyet
+        cinsiyet_col = next((col for col in df_final.columns if "CİNSİYET" in col.upper()), None) # df_final'de olmayabilir, raw'a bak
+        if not cinsiyet_col: 
+             cinsiyet_col = next((col for col in df_filtered.columns if "CİNSİYET" in col.upper()), None)
+             target_df = df_filtered
         else:
-            col_g1.warning("Dosyada Cinsiyet bilgisi bulunamadı.")
+             target_df = df_final
 
-        # B. İLÇE DAĞILIMI (BAR)
-        ilce_col_raw = next((col for col in df_raw.columns if "İLÇE" in col.upper()), None)
-        
+        if cinsiyet_col:
+            df_gender = target_df[cinsiyet_col].astype(str).replace(['nan', 'NaN'], '').str.strip()
+            df_gender = df_gender[df_gender != '']
+            df_gender_counts = df_gender.value_counts().reset_index()
+            df_gender_counts.columns = ["Cinsiyet", "Adet"]
+            
+            if not df_gender_counts.empty:
+                fig_pie = px.pie(df_gender_counts, values='Adet', names='Cinsiyet', 
+                                 title='Cinsiyet Dağılımı', hole=0.4)
+                col_g1.plotly_chart(fig_pie, use_container_width=True)
+
+        # İlçe
+        ilce_col_raw = next((col for col in df_filtered.columns if "İLÇE" in col.upper()), None)
         if ilce_col_raw:
-            df_ilce = df_raw[ilce_col_raw].value_counts().reset_index()
+            df_ilce = df_filtered[ilce_col_raw].value_counts().reset_index()
             df_ilce.columns = ["İlçe", "İtiraz Sayısı"]
-            # Çoktan aza sırala
-            df_ilce = df_ilce.sort_values("İtiraz Sayısı", ascending=True) # Bar chart için ters sıralama daha iyi durur
+            df_ilce = df_ilce.sort_values("İtiraz Sayısı", ascending=True)
             
             fig_bar = px.bar(df_ilce, x="İtiraz Sayısı", y="İlçe", 
-                             title="İlçelere Göre İtiraz Yoğunluğu", 
-                             text_auto=True, orientation='h')
-            fig_bar.update_layout(height=600) # İlçe çoksa boyu uzat
+                             title="İlçe Dağılımı", text_auto=True, orientation='h')
+            fig_bar.update_layout(height=500)
             col_g2.plotly_chart(fig_bar, use_container_width=True)
-        else:
-            col_g2.warning("Dosyada İlçe bilgisi bulunamadı.")
 
 else:
     st.info("👈 Rapor oluşturmak ve grafikleri görmek için lütfen sol menüden Excel dosyanızı yükleyiniz.")
