@@ -84,11 +84,11 @@ if uploaded_file:
         return (s != '').sum()
 
     def count_contains(df, col_keywords, search_term):
-        """Belirli bir sütunda (veya sütunlarda) kelime arar"""
+        """Belirli bir sütunda kelime arar"""
         col_name = next((col for col in df.columns if any(k in col.upper() for k in col_keywords)), None)
         if not col_name: return 0
         
-        # Türkçe karakter duyarlılığı için basit normalizasyon
+        # Türkçe karakter normalizasyonu
         s = df[col_name].astype(str).str.upper().str.replace('İ', 'I').str.replace('Ğ', 'G').str.replace('Ü', 'U').str.replace('Ş', 'S').str.replace('Ö', 'O').str.replace('Ç', 'C')
         search_term = search_term.upper().replace('İ', 'I').replace('Ğ', 'G').replace('Ü', 'U').replace('Ş', 'S').replace('Ö', 'O').replace('Ç', 'C')
         
@@ -100,7 +100,7 @@ if uploaded_file:
     
     st.subheader(f"📊 {baslik_ilce} - {baslik_donem} Özeti")
     
-    # --- 1. TEMEL KPI'LAR (EN ÜST) ---
+    # --- 1. TEMEL KPI'LAR ---
     count_gebe = safe_count(df_filtered, "GEBE İZLEM")
     count_lohusa = safe_count(df_filtered, "LOHUSA İZLEM")
     count_bebek = safe_count(df_filtered, "BEBEK İZLEM")
@@ -121,24 +121,17 @@ if uploaded_file:
 
     with col_asm:
         st.info("📝 **ASM Onam Durumu**")
-        
-        # ASM ONAM Sütununu Bul
         asm_onam_keywords = ["ASM ONAM", "ONAM"]
-        
-        # Sayımları Yap
         count_imzali = count_contains(df_filtered, asm_onam_keywords, "IMZALI RED")
         count_imtina = count_contains(df_filtered, asm_onam_keywords, "IMTINA")
         
-        # Oranlar
         ratio_imzali = (count_imzali / total_itiraz * 100) if total_itiraz > 0 else 0
         ratio_imtina = (count_imtina / total_itiraz * 100) if total_itiraz > 0 else 0
         
-        # Metrik Gösterimi
         c1, c2 = st.columns(2)
         c1.metric("İmzalı Red", count_imzali, f"%{ratio_imzali:.1f}")
         c2.metric("İmzadan İmtina", count_imtina, f"%{ratio_imtina:.1f}")
         
-        # Görsel
         df_onam = pd.DataFrame({
             "Durum": ["İmzalı Red", "İmzadan İmtina", "Diğer"],
             "Adet": [count_imzali, count_imtina, total_itiraz - (count_imzali + count_imtina)]
@@ -150,24 +143,17 @@ if uploaded_file:
 
     with col_ilce:
         st.info("🔍 **İlçe Sağlık Teyit Yöntemi**")
-        
-        # İLÇE TEYİT Sütununu Bul
         teyit_keywords = ["İLÇE SAĞLIK TEYİT", "İLÇE TEYİT", "TEYİT SONUCU"]
-        
-        # Sayımları Yap
         count_telefon = count_contains(df_filtered, teyit_keywords, "TELEFON")
-        count_ev = count_contains(df_filtered, teyit_keywords, "EV") # Ev ziyareti, evde, vb.
+        count_ev = count_contains(df_filtered, teyit_keywords, "EV")
         
-        # Oranlar
         ratio_telefon = (count_telefon / total_itiraz * 100) if total_itiraz > 0 else 0
         ratio_ev = (count_ev / total_itiraz * 100) if total_itiraz > 0 else 0
         
-        # Metrik Gösterimi
         c3, c4 = st.columns(2)
         c3.metric("Telefonla Teyit", count_telefon, f"%{ratio_telefon:.1f}")
         c4.metric("Ev Ziyareti", count_ev, f"%{ratio_ev:.1f}")
         
-        # Görsel
         df_teyit = pd.DataFrame({
             "Yöntem": ["Telefon", "Ev Ziyareti", "Diğer/Belirsiz"],
             "Adet": [count_telefon, count_ev, total_itiraz - (count_telefon + count_ev)]
@@ -179,7 +165,52 @@ if uploaded_file:
 
     st.markdown("---")
 
-    # --- 3. AŞI VE DETAY GRAFİKLERİ ---
+    # --- 3. RED NEDENLERİ ANALİZİ (BİRLEŞTİRİLMİŞ) ---
+    st.subheader("🚫 Red Nedenleri Analizi (ASM + İlçe Sağlık)")
+    
+    # İlgili sütunları bul
+    col_asm_red = next((col for col in df_filtered.columns if "ASM RED" in col.upper()), None)
+    col_ilce_red = next((col for col in df_filtered.columns if "İLÇE SAĞLIK RED" in col.upper() or "İLÇE RED" in col.upper()), None)
+
+    all_red_reasons = []
+
+    if col_asm_red:
+        # Boş olmayanları al, listeye ekle
+        reasons = df_filtered[col_asm_red].dropna().astype(str).tolist()
+        # 'nan', '0', '-' gibi anlamsız verileri temizle
+        reasons = [r.strip() for r in reasons if len(r.strip()) > 2 and r.lower() not in ['nan', 'none', '0']]
+        all_red_reasons.extend(reasons)
+
+    if col_ilce_red:
+        reasons = df_filtered[col_ilce_red].dropna().astype(str).tolist()
+        reasons = [r.strip() for r in reasons if len(r.strip()) > 2 and r.lower() not in ['nan', 'none', '0']]
+        all_red_reasons.extend(reasons)
+
+    if all_red_reasons:
+        # Pandas Serisine çevirip saydır
+        red_series = pd.Series(all_red_reasons)
+        red_counts = red_series.value_counts().reset_index()
+        red_counts.columns = ["Red Nedeni", "Sayı"]
+        
+        # İlk 10 Nedeni Göster
+        top_red_reasons = red_counts.head(10)
+        
+        col_r1, col_r2 = st.columns([2, 1])
+        
+        with col_r1:
+             fig_red = px.pie(top_red_reasons, values='Sayı', names='Red Nedeni', 
+                              title='En Sık Karşılaşılan Red Nedenleri (İlk 10)', hole=0.4)
+             st.plotly_chart(fig_red, use_container_width=True)
+             
+        with col_r2:
+            st.dataframe(red_counts, use_container_width=True, height=350)
+            
+    else:
+        st.info("Red nedeni içeren veri bulunamadı.")
+
+    st.markdown("---")
+
+    # --- 4. AŞI VE İLÇE GRAFİKLERİ ---
     col_a1, col_a2 = st.columns([2, 1])
 
     with col_a1:
@@ -204,10 +235,10 @@ if uploaded_file:
         if ilce_col:
             df_ilce = df_filtered[ilce_col].value_counts().reset_index()
             df_ilce.columns = ["İlçe", "Adet"]
-            df_ilce = df_ilce.sort_values("Adet", ascending=True).tail(10) # En çok olan 10 ilçe
+            df_ilce = df_ilce.sort_values("Adet", ascending=True).tail(15) 
             
             fig_bar_ilce = px.bar(df_ilce, x="Adet", y="İlçe", text_auto=True, orientation='h')
-            fig_bar_ilce.update_layout(height=400)
+            fig_bar_ilce.update_layout(height=450)
             st.plotly_chart(fig_bar_ilce, use_container_width=True)
         else:
             st.warning("İlçe sütunu bulunamadı.")
